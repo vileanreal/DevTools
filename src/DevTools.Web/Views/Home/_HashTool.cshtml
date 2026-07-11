@@ -1,0 +1,8 @@
+<div class="tool-heading"><div><span class="eyebrow">ENCODE & VERIFY</span><h1>Hash generator</h1><p>Generate a deterministic digest from UTF-8 text.</p></div><span class="badge-soft">Server-side · In memory</span></div>
+<div class="tool-card">
+    <div class="card-toolbar"><label for="hash-algorithm">Algorithm</label><select id="hash-algorithm" class="form-select form-select-sm"><option>SHA256</option><option>SHA384</option><option>SHA512</option><option>SHA1</option><option>MD5</option></select></div>
+    <label class="field-label" for="hash-input">Input</label>
+    <textarea id="hash-input" class="form-control code-input" placeholder="Type or paste text here…"></textarea>
+    <div class="action-row"><span id="hash-count" class="text-muted">0 characters</span><div><button class="btn btn-ghost clear-btn" data-target="hash-input">Clear</button><button id="hash-run" class="btn btn-primary">Generate hash</button></div></div>
+</div>
+<div id="hash-result-card" class="tool-card result-card d-none"><div class="result-title"><span>Result</span><button class="btn btn-sm btn-ghost copy-btn" data-target="hash-output">Copy</button></div><code id="hash-output" class="hash-output"></code></div>

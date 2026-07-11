@@ -1,0 +1,48 @@
+﻿<!DOCTYPE html>
+@using DevTools.Web.Security
+@inject Microsoft.Extensions.Options.IOptions<LoginOptions> LoginConfiguration
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>@ViewData["Title"] · DevTools</title>
+    <script type="importmap"></script>
+    <script>
+        (() => {
+            const theme = localStorage.getItem('devtools-theme') || 'light';
+            document.documentElement.dataset.theme = theme;
+            document.documentElement.dataset.bsTheme = theme;
+        })();
+    </script>
+    <link rel="stylesheet" href="~/lib/bootstrap/dist/css/bootstrap.min.css" />
+    <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
+    <link rel="stylesheet" href="~/DevTools.Web.styles.css" asp-append-version="true" />
+</head>
+<body>
+    <header class="site-header">
+        <div class="site-header-inner">
+            <a class="brand text-decoration-none" asp-controller="Home" asp-action="Index" aria-label="DevTools home">
+                <span class="brand-mark">DT</span><span>DevTools</span>
+            </a>
+            <div class="site-header-actions">
+                <span class="privacy-note d-none d-sm-inline"><span class="status-dot"></span> Local-first utilities</span>
+                @if (LoginConfiguration.Value.UseLogin && User.Identity?.IsAuthenticated == true)
+                {
+                    <span class="signed-in-user" title="Signed in user">@User.Identity.Name</span>
+                    <form asp-controller="Account" asp-action="Logout" method="post" class="logout-form">
+                        <button class="btn btn-sm btn-outline-secondary" type="submit">Sign out</button>
+                    </form>
+                }
+                <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Switch to dark theme" aria-pressed="false">
+                    <span class="theme-toggle-icon" aria-hidden="true">☾</span><span class="theme-toggle-label">Dark</span>
+                </button>
+            </div>
+        </div>
+    </header>
+    <main role="main">@RenderBody()</main>
+    <script src="~/lib/jquery/dist/jquery.min.js"></script>
+    <script src="~/lib/bootstrap/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="~/js/site.js" asp-append-version="true"></script>
+    @await RenderSectionAsync("Scripts", required: false)
+</body>
+</html>

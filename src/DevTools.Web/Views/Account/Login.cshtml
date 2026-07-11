@@ -1,0 +1,29 @@
+@model LoginViewModel
+@{
+    ViewData["Title"] = "Login";
+}
+
+<div class="login-page">
+    <section class="login-card" aria-labelledby="login-title">
+        <div class="login-mark" aria-hidden="true">DT</div>
+        <span class="eyebrow">SECURE ACCESS</span>
+        <h1 id="login-title">Sign in to DevTools</h1>
+        <p>Enter the credentials configured for this installation.</p>
+        <form asp-controller="Account" asp-action="Login" method="post" class="login-form">
+            <input asp-for="ReturnUrl" type="hidden" />
+            <div asp-validation-summary="ModelOnly" class="login-error" role="alert"></div>
+            <div>
+                <label asp-for="Username" class="field-label"></label>
+                <input asp-for="Username" class="form-control" autocomplete="username" autofocus />
+                <span asp-validation-for="Username" class="login-error"></span>
+            </div>
+            <div>
+                <label asp-for="Password" class="field-label"></label>
+                <input asp-for="Password" class="form-control" autocomplete="current-password" />
+                <span asp-validation-for="Password" class="login-error"></span>
+            </div>
+            <label class="login-remember"><input asp-for="RememberMe" class="form-check-input" /> <span>Keep me signed in for 24 hours</span></label>
+            <button class="btn btn-primary login-submit" type="submit">Sign in</button>
+        </form>
+    </section>
+</div>

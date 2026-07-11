@@ -1,0 +1,49 @@
+<nav class="tool-breadcrumb" aria-label="Breadcrumb">
+    <ol>
+        <li><a asp-controller="Home" asp-action="Index">Home</a></li>
+        <li><button id="system-back" type="button" disabled aria-current="page">System logs</button></li>
+        <li id="system-breadcrumb-current" class="d-none" aria-current="page"></li>
+    </ol>
+</nav>
+<div id="systems-view">
+    <div class="tool-heading"><div><span class="eyebrow">MONITOR & ANALYZE</span><h1>System logs</h1><p>Choose a system to manage modules and analyze its logs.</p></div><button id="system-add" class="btn btn-primary">+ Add system</button></div>
+    <div class="list-heading"><div><h2>Your systems</h2><p><span id="system-count">0</span> configured systems</p></div></div>
+    <div id="system-list" class="system-list-rows"><div class="tool-card empty-state">No systems yet. Add one to begin monitoring logs.</div></div>
+</div>
+<div id="system-detail-view" class="d-none">
+    <div id="system-detail"></div>
+</div>
+
+<div class="modal fade" id="system-modal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered"><form id="system-form" class="modal-content">
+        <div class="modal-header"><h5 class="modal-title">Add system</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+        <div class="modal-body"><label for="system-name" class="field-label">System name</label><input id="system-name" class="form-control" maxlength="120" required placeholder="e.g. Payments API"></div>
+        <div class="modal-footer"><button type="button" class="btn btn-ghost" data-bs-dismiss="modal">Cancel</button><button class="btn btn-primary">Add system</button></div>
+    </form></div>
+</div>
+<div class="modal fade" id="source-modal" tabindex="-1">
+    <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable module-modal-dialog"><form id="source-form" class="modal-content">
+        <input id="source-id" type="hidden">
+        <div class="modal-header"><h5 id="source-modal-title" class="modal-title">Add module</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+        <div class="modal-body">
+            <div class="module-form-grid">
+                <section class="module-form-section">
+                    <h6>Module settings</h6>
+                    <label for="source-module" class="field-label">Module name</label><input id="source-module" class="form-control mb-3" maxlength="120" required placeholder="e.g. Web API">
+                    <label for="source-path" class="field-label">Log file or folder path</label><input id="source-path" class="form-control mb-3" maxlength="2048" required placeholder="C:\logs\payments">
+                    <label for="source-format" class="field-label">Reader format</label>
+                    <select id="source-format" class="form-select"><option value="auto">Auto-detect (recommended)</option><option value="text">Structured text</option><option value="json">JSON Lines</option><option value="custom">Custom regex</option></select>
+                    <div id="custom-pattern-group" class="mt-3 d-none"><label for="source-pattern" class="field-label">Custom regex</label><textarea id="source-pattern" class="form-control code-input regex-input" maxlength="2000" placeholder="^(?&lt;timestamp&gt;...) (?&lt;level&gt;...) (?&lt;message&gt;.*)$"></textarea><div class="form-text">Required named groups: <code>timestamp</code>, <code>level</code>, and <code>message</code>.</div></div>
+                    <div id="source-timestamp-format-group" class="mt-3 d-none"><label for="source-timestamp-format" class="field-label">Timestamp format</label><input id="source-timestamp-format" class="form-control" maxlength="100" placeholder="yyyy-MM-dd HH:mm:ss.fff"><div class="form-text">Optional. Examples: <code>HH:mm:ss,fff tt</code>, <code>yyyyMMdd_HHmmss</code>, <code>MM/dd/yyyy HH:mm:ss</code>.</div></div>
+                    <div class="form-text mt-3">Auto-detect supports common text, Serilog, syslog, JSON, and multiline .NET stack traces.</div>
+                </section>
+                <section class="module-form-section parser-test-section">
+                    <div class="section-heading compact-heading"><div><h6>Test parser</h6><p>Paste a representative entry, including its stack trace.</p></div><button id="source-preview-run" class="btn btn-outline-primary btn-sm" type="button">Test parse</button></div>
+                    <textarea id="source-preview-sample" class="form-control code-input parser-sample-input" rows="12" maxlength="20000" placeholder="Paste a few log lines here before saving."></textarea>
+                    <div id="source-preview-result" class="parser-preview mt-3 d-none"></div>
+                </section>
+            </div>
+        </div>
+        <div class="modal-footer"><span id="source-save-progress" class="me-auto text-muted small"></span><button type="button" class="btn btn-ghost" data-bs-dismiss="modal">Cancel</button><button id="source-submit" class="btn btn-primary">Add module</button></div>
+    </form></div>
+</div>

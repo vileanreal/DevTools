@@ -1,0 +1,116 @@
+@using DevTools.Shared.Models
+@model SystemLogPage
+@{
+    bool Has(string column) => Model.VisibleColumns.Contains(column, StringComparer.OrdinalIgnoreCase);
+    var columnCount = Model.VisibleColumns.Count;
+    var chartMax = Math.Max(1, Model.Chart.SelectMany(series => series.Points).DefaultIfEmpty(new LogChartPoint("", 0)).Max(point => point.Count));
+    var fromItem = Model.TotalEntries == 0 ? 0 : ((Model.Page - 1) * Model.PageSize) + 1;
+    var toItem = Math.Min(Model.Page * Model.PageSize, Model.TotalEntries);
+    var chartLabel = $"Logs over time · {Model.TimeBucket}";
+    var levelColors = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["FATAL"]="#7a1cac", ["ERROR"]="#d92d20", ["WARN"]="#e59b18", ["INFO"]="#2e90fa", ["DEBUG"]="#7a5af8", ["TRACE"]="#12b76a", ["OTHER"]="#667085" };
+    var chartLabels = Model.Chart.FirstOrDefault()?.Points.Select(point => point.Label).ToList() ?? [];
+    const double svgHeight = 330, padLeft = 60, padTop = 18, padRight = 28, padBottom = 105;
+    var svgWidth = Math.Max(940, chartLabels.Count * 94 + padLeft + padRight);
+    var plotWidth = svgWidth - padLeft - padRight;
+    var plotHeight = svgHeight - padTop - padBottom;
+}
+@if (Model.ChartBy != "none")
+{
+<details class="content-section visualization-section" open>
+    <summary class="visualization-summary"><span><strong>Log visualization</strong><small>@chartLabel · click to collapse</small></span><span class="visualization-chevron" aria-hidden="true">⌄</span></summary>
+    <div class="visualization-content">
+    <div class="chart-panel" aria-label="Log statistics chart">
+    <form id="visualization-form" class="chart-controls">
+        <div><label for="chart-time-bucket">Time grouping</label><select id="chart-time-bucket" name="timeBucket" class="form-select"><option value="auto" selected="@(Model.TimeBucket == "auto")">Automatic</option><option value="minute" selected="@(Model.TimeBucket == "minute")">Per minute</option><option value="hour" selected="@(Model.TimeBucket == "hour")">Per hour</option><option value="day" selected="@(Model.TimeBucket == "day")">Per day</option><option value="week" selected="@(Model.TimeBucket == "week")">Per week</option><option value="month" selected="@(Model.TimeBucket == "month")">Per month</option><option value="year" selected="@(Model.TimeBucket == "year")">Per year</option></select></div>
+        <div><label for="chart-from">Chart from</label><input id="chart-from" name="chartFrom" type="datetime-local" class="form-control" value="@Model.ChartFrom?.ToLocalTime().ToString("yyyy-MM-ddTHH:mm")"></div>
+        <div><label for="chart-to">Chart to</label><input id="chart-to" name="chartTo" type="datetime-local" class="form-control" value="@Model.ChartTo?.ToLocalTime().ToString("yyyy-MM-ddTHH:mm")"></div>
+        <div><label for="chart-level">Show level</label><select id="chart-level" name="chartLevel" class="form-select"><option value="ALL" selected="@(Model.ChartLevel == "ALL")">All levels — separate lines</option>@foreach(var level in levelColors.Keys){<option value="@level" selected="@(Model.ChartLevel == level)">@level only</option>}</select></div>
+        <button class="btn btn-outline-primary">Update line chart</button>
+    </form>
+    <div class="chart-header"><strong>@chartLabel</strong><span>@(Model.ChartLevel == "ALL" ? "One independent line per log level" : $"Showing {Model.ChartLevel} only")</span></div>
+    @if(Model.Chart.Count>0){<div class="chart-legend">@foreach(var series in Model.Chart){<span><i style="--series-color:@levelColors.GetValueOrDefault(series.Level,"#667085")"></i>@series.Level</span>}</div>}
+    @if (Model.Chart.Count == 0) { <div class="empty-state py-4">No timestamp data for this filter.</div> }
+    else
+    {
+        <div class="line-chart-wrap">
+            <svg class="line-chart" style="width:@(svgWidth)px" viewBox="0 0 @svgWidth @svgHeight" role="img" aria-label="@chartLabel">
+                @for (var grid = 0; grid <= 4; grid++)
+                {
+                    var y = padTop + grid * plotHeight / 4;
+                    var value = Math.Round(chartMax * (4 - grid) / 4d);
+                    <line class="line-chart-grid" x1="@padLeft" y1="@y" x2="@(svgWidth-padRight)" y2="@y"></line>@Html.Raw($"<text class=\"line-chart-axis\" x=\"{padLeft-8}\" y=\"{y+4}\" text-anchor=\"end\">{value:N0}</text>")
+                }
+                @for(var labelIndex=0;labelIndex<chartLabels.Count;labelIndex++)
+                {
+                    var x=chartLabels.Count==1?padLeft+plotWidth/2:padLeft+labelIndex*plotWidth/(chartLabels.Count-1);
+                    <line class="line-chart-tick" x1="@x" y1="@(padTop+plotHeight)" x2="@x" y2="@(padTop+plotHeight+5)"></line>@Html.Raw($"<text class=\"line-chart-axis line-chart-label\" x=\"{x}\" y=\"{padTop+plotHeight+28}\" text-anchor=\"end\" transform=\"rotate(-42 {x} {padTop+plotHeight+28})\">{System.Text.Encodings.Web.HtmlEncoder.Default.Encode(chartLabels[labelIndex])}</text>")
+                }
+                @foreach (var series in Model.Chart)
+                {
+                    var color = levelColors.GetValueOrDefault(series.Level, "#667085");
+                    var points = series.Points.Select((point,index) => new { Point=point, X=series.Points.Count==1?padLeft+plotWidth/2:padLeft+index*plotWidth/(series.Points.Count-1), Y=padTop+plotHeight-point.Count*plotHeight/chartMax }).ToList();
+                    var path = string.Join(" ",points.Select((point,index)=>$"{(index==0?"M":"L")} {point.X.ToString("0.##",System.Globalization.CultureInfo.InvariantCulture)} {point.Y.ToString("0.##",System.Globalization.CultureInfo.InvariantCulture)}"));
+                    <path class="line-chart-path" style="stroke:@color" d="@path"><title>@series.Level</title></path>
+                    @if (points.Count <= 60) { @foreach(var point in points){<circle class="line-chart-point" style="stroke:@color" cx="@point.X" cy="@point.Y" r="2.5"><title>@series.Level · @point.Point.Label: @point.Point.Count.ToString("N0")</title></circle>} }
+                }
+            </svg>
+        </div>
+    }
+    </div>
+    </div>
+</details>
+}
+<section class="content-section log-analysis-section">
+<div class="section-heading"><div><h2>Log analysis</h2><p>Statistics and indexed log entries matching the active filters.</p></div></div>
+<div class="stats-grid">
+    <div class="stat-card"><strong>@Model.Summary.TotalEntries.ToString("N0")</strong><span>Matching entries</span></div>
+    <div class="stat-card stat-danger"><strong>@Model.Summary.ErrorCount.ToString("N0")</strong><span>Errors / fatal</span></div>
+    <div class="stat-card stat-warning"><strong>@Model.Summary.WarningCount.ToString("N0")</strong><span>Warnings</span></div>
+    <div class="stat-card"><strong>@Model.Summary.FileCount.ToString("N0")</strong><span>Matching files</span></div>
+</div>
+<div class="table-meta"><span>Showing @fromItem.ToString("N0")–@toItem.ToString("N0") of @Model.TotalEntries.ToString("N0") @if(Has("timestamp")){<small>· * derived timestamp</small>}</span><span>Generated @Model.GeneratedAt.ToLocalTime().ToString("g")</span></div>
+<div class="table-responsive">
+    <table class="table log-table system-log-table">
+        <thead><tr>@if(Has("timestamp")){<th>Time</th>}@if(Has("module")){<th>Module</th>}@if(Has("file")){<th>File</th>}@if(Has("level")){<th>Level</th>}@if(Has("message")){<th>Message</th>}</tr></thead>
+        <tbody>
+        @if (Model.Entries.Count == 0) { <tr><td colspan="@columnCount" class="empty-state">No log entries match these filters.</td></tr> }
+        @foreach (var entry in Model.Entries)
+        {
+            <tr>
+                @if(Has("timestamp")){<td><time datetime="@entry.Timestamp.ToString("O")">@entry.Timestamp.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")</time>@if(entry.TimestampSource != "content"){<span class="timestamp-origin" title="Timestamp derived from @(entry.TimestampSource == "filename" ? "the filename" : "file modified time")">*</span>}</td>}
+                @if(Has("module")){<td><strong>@entry.ModuleName</strong></td>}
+                @if(Has("file")){<td class="file-cell" title="@entry.FileName"><a class="file-download-link" href="/api/system-logs/systems/@Model.SystemId/entries/@entry.Id/file">@entry.FileName</a></td>}
+                @if(Has("level")){<td><span class="level-pill level-@entry.Level.ToLowerInvariant()">@entry.Level</span></td>}
+                @if(Has("message")){<td class="log-message-cell @(entry.Level is "ERROR" or "FATAL" ? "log-message-error" : null)"><span class="log-message-preview">@entry.MessagePreview</span>@if(entry.IsTruncated){<button class="view-message" type="button" data-entry-id="@entry.Id">View more</button>}</td>}
+            </tr>
+        }
+        </tbody>
+    </table>
+</div>
+@if (Model.TotalPages > 1)
+{
+    var windowStart = Math.Max(1, Model.Page - 2);
+    var windowEnd = Math.Min(Model.TotalPages, Model.Page + 2);
+    <nav class="pager-row" aria-label="Log pages">
+        <button class="btn btn-sm btn-outline-secondary page-link-button" data-page="@(Model.Page - 1)" disabled="@(Model.Page <= 1)">Previous</button>
+        <div class="page-numbers">
+            @if (windowStart > 1)
+            {
+                <button class="page-number page-link-button" data-page="1" aria-label="Page 1">1</button>
+                @if (windowStart > 2) { <span class="page-ellipsis" aria-hidden="true">…</span> }
+            }
+            @for (var pageNumber = windowStart; pageNumber <= windowEnd; pageNumber++)
+            {
+                <button class="page-number page-link-button @(pageNumber == Model.Page ? "active" : "")" data-page="@pageNumber" aria-label="Page @pageNumber" aria-current="@(pageNumber == Model.Page ? "page" : null)">@pageNumber</button>
+            }
+            @if (windowEnd < Model.TotalPages)
+            {
+                @if (windowEnd < Model.TotalPages - 1) { <span class="page-ellipsis" aria-hidden="true">…</span> }
+                <button class="page-number page-link-button" data-page="@Model.TotalPages" aria-label="Page @Model.TotalPages">@Model.TotalPages</button>
+            }
+        </div>
+        <button class="btn btn-sm btn-outline-secondary page-link-button" data-page="@(Model.Page + 1)" disabled="@(Model.Page >= Model.TotalPages)">Next</button>
+    </nav>
+    <div class="page-summary">Page @Model.Page.ToString("N0") of @Model.TotalPages.ToString("N0")</div>
+}
+</section>

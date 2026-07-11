@@ -1,0 +1,23 @@
+<div class="tool-heading"><div><span class="eyebrow">FORMAT & VALIDATE</span><h1>Code formatter</h1><p>Clean up source code and structured data with consistent indentation.</p></div><span class="badge-soft">22 language modes</span></div>
+
+<div class="tool-card formatter-options">
+    <div><label for="code-language" class="field-label">Language</label><select id="code-language" class="form-select">
+        <optgroup label="Data & markup"><option value="json">JSON</option><option value="html">HTML</option><option value="xml">XML</option><option value="yaml">YAML</option><option value="sql">SQL</option></optgroup>
+        <optgroup label="Application code"><option value="csharp" selected>C#</option><option value="java">Java</option><option value="javascript">JavaScript</option><option value="typescript">TypeScript</option><option value="python">Python</option><option value="cpp">C++</option><option value="c">C</option><option value="go">Go</option><option value="rust">Rust</option><option value="kotlin">Kotlin</option><option value="swift">Swift</option><option value="ruby">Ruby</option><option value="php">PHP</option><option value="shell">Shell</option></optgroup>
+        <optgroup label="Styles & text"><option value="css">CSS</option><option value="scss">SCSS</option><option value="plaintext">Plain text</option></optgroup>
+    </select></div>
+    <div><label for="code-indent-size" class="field-label">Indent size</label><select id="code-indent-size" class="form-select"><option value="2">2 spaces</option><option value="4" selected>4 spaces</option><option value="8">8 spaces</option></select></div>
+    <div><label for="code-indent-type" class="field-label">Indent style</label><select id="code-indent-type" class="form-select"><option value="spaces" selected>Spaces</option><option value="tabs">Tabs</option></select></div>
+</div>
+
+<div class="split-editor">
+    <div class="tool-card editor-pane">
+        <div class="result-title"><label for="code-input">Input</label><button class="btn btn-sm btn-ghost" id="code-example">Use example</button></div>
+        <div class="syntax-editor"><pre id="code-input-highlight" class="syntax-layer" aria-hidden="true"><code></code></pre><textarea id="code-input" class="form-control code-input tall syntax-source" wrap="off" spellcheck="false" placeholder="Paste source code here…"></textarea></div>
+    </div>
+    <div class="tool-card editor-pane">
+        <div class="result-title"><label for="code-output">Formatted output</label><button class="btn btn-sm btn-ghost copy-btn" data-target="code-output">Copy</button></div>
+        <div class="syntax-editor"><pre id="code-output-highlight" class="syntax-layer output" aria-hidden="true"><code></code></pre><textarea id="code-output" class="form-control code-input tall output syntax-source" wrap="off" readonly placeholder="Formatted code appears here."></textarea></div>
+    </div>
+</div>
+<div class="action-row"><span class="text-muted">Choose tabs or 2, 4, or 8 spaces.</span><div><button class="btn btn-ghost clear-pair" data-key="code">Clear</button><button class="btn btn-primary" id="code-format">Format code</button></div></div>

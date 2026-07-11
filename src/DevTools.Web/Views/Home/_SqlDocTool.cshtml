@@ -1,0 +1,120 @@
+<div class="tool-heading">
+    <div>
+        <span class="eyebrow">SQL DOC</span>
+        <h1>Database documentation</h1>
+        <p>Save database sources, inspect objects, and export schema documentation.</p>
+    </div>
+    <button id="sql-source-add" class="btn btn-primary" type="button">+ Add source</button>
+</div>
+
+<div class="modal fade" id="sql-object-modal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header"><h5 id="sql-object-modal-title" class="modal-title">Object details</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+            <div id="sql-object-modal-body" class="modal-body"></div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="sql-diagram-objects-modal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div><h5 class="modal-title">Choose diagram objects</h5><p class="modal-subtitle">Select the database tables to place on the canvas.</p></div>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div id="sql-diagram-objects-body" class="modal-body"></div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-ghost" data-bs-dismiss="modal">Cancel</button>
+                <button id="sql-diagram-objects-apply" type="button" class="btn btn-primary">Apply to diagram</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<section class="content-section sql-source-panel">
+    <div class="list-heading">
+        <div>
+            <h2>Databases</h2>
+            <p><span id="sql-source-count">0</span> saved sources</p>
+        </div>
+    </div>
+    <div id="sql-source-list" class="sql-source-list"></div>
+</section>
+
+<section id="sql-doc-workspace" class="content-section sql-doc-workspace">
+    <div class="empty-state">Select a database source to inspect objects.</div>
+</section>
+
+<div class="modal fade" id="sql-source-modal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <form id="sql-source-form" class="modal-content">
+            <div class="modal-header">
+                <h5 id="sql-source-modal-title" class="modal-title">Add database source</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <input id="sql-source-id" type="hidden">
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <label class="form-label" for="sql-source-name">Source name</label>
+                        <input id="sql-source-name" class="form-control" maxlength="120" required placeholder="Reporting database">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label" for="sql-source-provider">Provider</label>
+                        <select id="sql-source-provider" class="form-select" required>
+                            <option value="sqlserver">SQL Server</option>
+                            <option value="sqlite">SQLite</option>
+                            <option value="mysql">MySQL</option>
+                            <option value="oracle">Oracle</option>
+                            <option value="postgresql">PostgreSQL</option>
+                        </select>
+                    </div>
+                    <div class="col-md-8 sql-network-field">
+                        <label class="form-label" for="sql-source-server">Server</label>
+                        <input id="sql-source-server" class="form-control" maxlength="300" placeholder="localhost\SQLEXPRESS">
+                    </div>
+                    <div class="col-md-4 sql-network-field">
+                        <label class="form-label" for="sql-source-port">Port</label>
+                        <input id="sql-source-port" class="form-control" maxlength="10" placeholder="1433">
+                    </div>
+                    <div class="col-md-6 sql-auth-field">
+                        <label class="form-label" for="sql-source-username">Username</label>
+                        <input id="sql-source-username" class="form-control" maxlength="200" autocomplete="username">
+                    </div>
+                    <div class="col-md-6 sql-auth-field">
+                        <label class="form-label" for="sql-source-password">Password</label>
+                        <input id="sql-source-password" type="password" class="form-control" maxlength="500" autocomplete="current-password">
+                    </div>
+                    <div class="col-md-6 sql-server-option">
+                        <label class="form-check mt-2"><input id="sql-source-integrated" type="checkbox" class="form-check-input"> <span class="form-check-label">Use Windows authentication</span></label>
+                    </div>
+                    <div class="col-md-6 sql-server-option">
+                        <label class="form-check mt-2"><input id="sql-source-trust" type="checkbox" class="form-check-input" checked> <span class="form-check-label">Trust server certificate</span></label>
+                    </div>
+                    <div class="col-md-8 sql-database-field">
+                        <label class="form-label" for="sql-source-database">Database</label>
+                        <select id="sql-source-database" class="form-select"><option value="">Connect to load databases</option></select>
+                    </div>
+                    <div class="col-md-4 sql-database-field d-flex align-items-end">
+                        <button id="sql-load-databases" class="btn btn-outline-primary w-100" type="button">Connect</button>
+                    </div>
+                    <div class="col-12 sql-sqlite-field d-none">
+                        <label class="form-label" for="sql-source-sqlite-path">SQLite database file</label>
+                        <input id="sql-source-sqlite-path" class="form-control" maxlength="2048" placeholder="C:\data\app.db">
+                    </div>
+                    <div class="col-12">
+                        <details class="sql-advanced-connection">
+                            <summary>Advanced connection string</summary>
+                            <textarea id="sql-source-connection" class="form-control sql-connection-input mt-2" rows="3" maxlength="4000" placeholder="Optional override"></textarea>
+                        </details>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-ghost" data-bs-dismiss="modal">Cancel</button>
+                <button id="sql-source-submit" type="submit" class="btn btn-primary">Save source</button>
+            </div>
+        </form>
+    </div>
+</div>

@@ -1,0 +1,49 @@
+<div class="tool-heading compact-tool-heading">
+    <div><span class="eyebrow">LOCAL OPERATIONS</span><h1>System Services</h1><p>Group local Windows services and IIS application pools, check their state, and control them from one place.</p></div>
+    <span class="badge-soft">Local machine · Windows</span>
+</div>
+
+<section id="service-systems-view" class="content-section">
+    <div class="section-heading">
+        <div><h2>Systems</h2><p>Create a logical system, then attach the services that keep it running.</p></div>
+        <button id="service-system-add" class="btn btn-primary" type="button"><span aria-hidden="true">＋</span> Add system</button>
+    </div>
+    <div id="service-system-list" class="system-list-rows"><div class="empty-state">Loading systems…</div></div>
+</section>
+
+<section id="service-system-detail" class="d-none">
+    <button id="service-system-back" class="back-link" type="button">← All systems</button>
+    <div class="system-page-heading service-detail-heading">
+        <div><span class="eyebrow">SYSTEM</span><h1 id="service-system-name"></h1><p id="service-system-summary"></p></div>
+        <div class="service-heading-actions">
+            <button id="service-status-refresh" class="btn btn-outline-primary" type="button"><span class="refresh-symbol" aria-hidden="true">↻</span> Refresh status</button>
+            <button id="managed-service-add" class="btn btn-primary" type="button">＋ Add service</button>
+            <button id="service-system-delete" class="btn btn-ghost text-danger" type="button">Delete</button>
+        </div>
+    </div>
+    <section class="content-section">
+        <div class="section-heading"><div><h2>Services</h2><p>Actions run on the machine hosting DevTools and may require administrator permission.</p></div></div>
+        <div id="managed-service-list" class="managed-service-list"><div class="empty-state">Loading services…</div></div>
+        <div id="service-refresh-meta" class="service-refresh-meta"></div>
+    </section>
+</section>
+
+<div class="modal fade" id="serviceSystemModal" tabindex="-1" aria-labelledby="service-system-modal-title" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered"><form id="service-system-form" class="modal-content">
+        <div class="modal-header"><div><h5 class="modal-title" id="service-system-modal-title">Add system</h5><p class="modal-subtitle">Use a product, environment, or application name.</p></div><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
+        <div class="modal-body"><label class="field-label" for="service-system-input">System name</label><input id="service-system-input" class="form-control" maxlength="120" required placeholder="e.g. Order Processing"></div>
+        <div class="modal-footer"><button type="button" class="btn btn-ghost" data-bs-dismiss="modal">Cancel</button><button id="service-system-submit" class="btn btn-primary" type="submit">Add system</button></div>
+    </form></div>
+</div>
+
+<div class="modal fade" id="managedServiceModal" tabindex="-1" aria-labelledby="managed-service-modal-title" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered"><form id="managed-service-form" class="modal-content">
+        <div class="modal-header"><div><h5 class="modal-title" id="managed-service-modal-title">Add service</h5><p class="modal-subtitle">Reference a service installed on this DevTools host.</p></div><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
+        <div class="modal-body service-form-fields">
+            <div><label class="field-label" for="managed-service-name">Display name</label><input id="managed-service-name" class="form-control" maxlength="120" required placeholder="e.g. Orders API"></div>
+            <div><label class="field-label" for="managed-service-kind">Service type</label><select id="managed-service-kind" class="form-select"><option value="windows-service">Windows service</option><option value="app-pool">IIS application pool</option></select></div>
+            <div><label id="managed-service-target-label" class="field-label" for="managed-service-target">Windows service name</label><input id="managed-service-target" class="form-control" maxlength="260" required placeholder="e.g. OrderWorker"><div id="managed-service-target-help" class="form-text">Use the service name shown in Windows Services properties, not necessarily its display name.</div></div>
+        </div>
+        <div class="modal-footer"><button type="button" class="btn btn-ghost" data-bs-dismiss="modal">Cancel</button><button id="managed-service-submit" class="btn btn-primary" type="submit">Add service</button></div>
+    </form></div>
+</div>

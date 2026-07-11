@@ -1,0 +1,15 @@
+<div class="tool-heading"><div><span class="eyebrow">INSPECT & FILTER</span><h1>Logs viewer</h1><p>Upload or paste logs, then inspect them in a structured workspace.</p></div><span class="badge-soft">No application size limit</span></div>
+
+<section class="content-section">
+    <div class="section-heading"><div><h2>Log source</h2><p>Paste text or load a local log file into the viewer.</p></div><label class="btn btn-sm btn-outline-primary mb-0" for="logs-file">Upload log file</label><input id="logs-file" type="file" class="visually-hidden" accept=".log,.txt,.out,.json,.jsonl"></div>
+    <textarea id="logs-input" class="form-control code-input logs-source-input" spellcheck="false" placeholder="2026-07-10 10:42:12 INFO Application started"></textarea>
+    <div class="action-row"><span id="logs-file-name" class="text-muted">Paste logs or choose a file</span><div><button class="btn btn-sm btn-ghost example-btn" data-target="logs-input" data-example="2026-07-10 10:42:12 INFO Application started&#10;2026-07-10 10:42:14 WARN Cache response was slow&#10;2026-07-10 10:42:19 ERROR Connection timed out">Use example</button><button id="logs-run" class="btn btn-primary">Analyze logs</button></div></div>
+</section>
+
+<section class="content-section">
+    <div class="section-heading"><div><h2>Filters &amp; analysis</h2><p>Filtering and pagination are processed before rows are rendered.</p></div><span id="logs-summary" class="snapshot-meta">No logs analyzed</span></div>
+    <div class="logs-query"><div><label for="logs-level">Level</label><select id="logs-level" class="form-select"><option>ALL</option><option>TRACE</option><option>DEBUG</option><option>INFO</option><option>WARN</option><option>ERROR</option><option>FATAL</option><option>OTHER</option></select></div><div><label for="logs-search">Search</label><input id="logs-search" class="form-control" placeholder="Search messages…"></div><div><label for="logs-page-size">Rows</label><select id="logs-page-size" class="form-select"><option>50</option><option selected>100</option><option>200</option><option>500</option></select></div></div>
+    <div id="logs-stats" class="stats-grid logs-stats"><div class="stat-card"><strong>0</strong><span>Entries</span></div><div class="stat-card stat-danger"><strong>0</strong><span>Errors</span></div><div class="stat-card stat-warning"><strong>0</strong><span>Warnings</span></div><div class="stat-card"><strong>0</strong><span>Information</span></div></div>
+    <div class="table-responsive"><table class="table log-table system-log-table"><thead><tr><th>Time</th><th>Level</th><th>Message</th></tr></thead><tbody id="logs-body"><tr><td colspan="3" class="empty-state">Analyzed log entries will appear here.</td></tr></tbody></table></div>
+    <div id="logs-pagination"></div>
+</section>
