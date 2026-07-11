@@ -9,6 +9,11 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using System.Threading.RateLimiting;
 
+DotEnvLoader.LoadFirstExisting(
+    Path.Combine(Directory.GetCurrentDirectory(), ".env"),
+    Path.Combine(Directory.GetCurrentDirectory(), "src", "DevTools.Web", ".env"),
+    Path.Combine(AppContext.BaseDirectory, ".env"));
+
 var builder = WebApplication.CreateBuilder(args);
 
 var configurationDatabasePath = ResolveDatabasePath(

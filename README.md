@@ -70,15 +70,22 @@ Relative paths are resolved from the web application's content root. Database fi
 
 ### Login
 
+The login switch remains in `appsettings.json`:
+
 ```json
 "Login": {
-  "UseLogin": true,
-  "UsernameMd5": "21232f297a57a5a743894a0e4a801fc3",
-  "PasswordMd5": "21232f297a57a5a743894a0e4a801fc3"
+  "UseLogin": true
 }
 ```
 
-The initial credentials are `admin` / `admin`. Change both hashes before exposing the application to other users. Set `UseLogin` to `false` to disable authentication.
+Copy `src/DevTools.Web/.env.example` to `src/DevTools.Web/.env`. The local `.env` file is ignored by Git and contains the credential hashes:
+
+```dotenv
+Login__UsernameMd5=21232f297a57a5a743894a0e4a801fc3
+Login__PasswordMd5=21232f297a57a5a743894a0e4a801fc3
+```
+
+The initial credentials are `admin` / `admin`. Change both hashes before exposing the application to other users. Set `UseLogin` to `false` to disable authentication. Operating-system environment variables with the same names take precedence over `.env` values.
 
 > MD5 compatibility is currently provided by the application, but MD5 is not suitable for strong password storage. Keep configuration files private, use HTTPS, and migrate to a modern password hashing algorithm for internet-facing deployments.
 

@@ -22,5 +22,9 @@
 *.log
 
 # Local configuration overrides and secrets
+.env
+.env.*
+!.env.example
+!**/.env.example
 appsettings.Local.json
 appsettings.*.Local.json
