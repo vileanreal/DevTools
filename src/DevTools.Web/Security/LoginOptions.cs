@@ -5,11 +5,11 @@ public sealed class LoginOptions
     public const string SectionName = "Login";
 
     public bool UseLogin { get; set; } = true;
-    public string UsernameMd5 { get; set; } = string.Empty;
-    public string PasswordMd5 { get; set; } = string.Empty;
+    public string UsernameSha256 { get; set; } = string.Empty;
+    public string PasswordSha256 { get; set; } = string.Empty;
 
-    public bool HasValidHashes() => !UseLogin || (IsMd5(UsernameMd5) && IsMd5(PasswordMd5));
+    public bool HasValidHashes() => !UseLogin || (IsSha256(UsernameSha256) && IsSha256(PasswordSha256));
 
-    private static bool IsMd5(string? value) =>
-        value?.Length == 32 && value.All(character => Uri.IsHexDigit(character));
+    private static bool IsSha256(string? value) =>
+        value?.Length == 64 && value.All(Uri.IsHexDigit);
 }

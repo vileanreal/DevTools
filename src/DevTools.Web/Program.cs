@@ -42,9 +42,9 @@ var useLogin = loginSection.GetValue(nameof(LoginOptions.UseLogin), true);
 builder.Services.AddOptions<LoginOptions>()
     .Bind(loginSection)
     .Validate(options => options.HasValidHashes(),
-        "Login UsernameMd5 and PasswordMd5 must be 32-character hexadecimal MD5 hashes when login is enabled.")
+        "Login UsernameSha256 and PasswordSha256 must be 64-character hexadecimal SHA-256 hashes when login is enabled.")
     .ValidateOnStart();
-builder.Services.AddSingleton<ILoginCredentialVerifier, Md5CredentialVerifier>();
+builder.Services.AddSingleton<ILoginCredentialVerifier, Sha256CredentialVerifier>();
 builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
     .AddCookie(options =>
     {

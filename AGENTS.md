@@ -12,7 +12,7 @@ DevTools is a privacy-friendly ASP.NET Core web application containing focused u
 - C# nullable reference types and implicit usings enabled
 - No database until a feature explicitly requires persistence
 - SQLite via Entity Framework Core. Database paths come from the `DatabasePaths` section in `src/DevTools.Web/appsettings.json`; relative paths resolve from the web content root. Configuration and SQL Doc data use `ConfigurationDatabase`, while the rebuildable System Logs index uses the independently deletable `LogIndexDatabase`.
-- Optional cookie authentication is enabled by `Login:UseLogin` in `appsettings.json`. Credential hashes come from the ignored `src/DevTools.Web/.env` file through `Login__UsernameMd5` and `Login__PasswordMd5`. When login is enabled, the fallback authorization policy protects all MVC and API endpoints except the login page and static assets. Credentials must never be logged.
+- Optional cookie authentication is enabled by `Login:UseLogin` in `appsettings.json`. Unsalted SHA-256 credential hashes come from the ignored `src/DevTools.Web/.env` file through `Login__UsernameSha256` and `Login__PasswordSha256`. When login is enabled, the fallback authorization policy protects all MVC and API endpoints except the login page and static assets. Credentials must never be logged.
 
 ## Architecture
 

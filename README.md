@@ -4,7 +4,7 @@ DevTools is a local-first ASP.NET Core web application that collects practical u
 
 ## Features
 
-- Hash generation
+- Hash generation with SHA-2, SHA-3, keyed HMAC, and legacy compatibility algorithms
 - Multi-language code formatting with syntax highlighting
 - Log file viewer
 - System Logs with incremental indexing, parsing, filtering, charts, and background jobs
@@ -81,13 +81,26 @@ The login switch remains in `appsettings.json`:
 Copy `src/DevTools.Web/.env.example` to `src/DevTools.Web/.env`. The local `.env` file is ignored by Git and contains the credential hashes:
 
 ```dotenv
-Login__UsernameMd5=21232f297a57a5a743894a0e4a801fc3
-Login__PasswordMd5=21232f297a57a5a743894a0e4a801fc3
+Login__UsernameSha256=8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918
+Login__PasswordSha256=8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918
 ```
 
 The initial credentials are `admin` / `admin`. Change both hashes before exposing the application to other users. Set `UseLogin` to `false` to disable authentication. Operating-system environment variables with the same names take precedence over `.env` values.
 
-> MD5 compatibility is currently provided by the application, but MD5 is not suitable for strong password storage. Keep configuration files private, use HTTPS, and migrate to a modern password hashing algorithm for internet-facing deployments.
+Generate an unsalted SHA-256 value in PowerShell:
+
+```powershell
+$value = "your-value"
+$bytes = [Text.Encoding]::UTF8.GetBytes($value)
+$hash = [Security.Cryptography.SHA256]::HashData($bytes)
+[Convert]::ToHexString($hash).ToLowerInvariant()
+```
+
+Run the command separately for the username and password. SHA-256 was selected because the configuration is quick to update and requires no salt, as intended for a locally hosted utility. Unsalted password hashes are vulnerable to offline dictionary attacks, so keep `.env` private, use a strong password and HTTPS, and do not expose this authentication scheme directly to the public internet.
+
+### Hash algorithms
+
+The Hash Tool supports SHA-256, SHA-384, SHA-512, SHA3-256, SHA3-384, SHA3-512, BLAKE2b-256, BLAKE2b-512, BLAKE2s-256, HMAC-SHA256, HMAC-SHA384, HMAC-SHA512, SHA-1, and MD5. HMAC algorithms require a separate secret key. SHA-1 and MD5 are retained only for compatibility and should not be used for security-sensitive work. SHA-3 and BLAKE2 use Bouncy Castle so their behavior is consistent on supported Windows/IIS installations.
 
 ## Data and privacy
 

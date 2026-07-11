@@ -17,8 +17,10 @@ public sealed class ToolsController(
     public ActionResult<ApiResult<HashResult>> Hash(HashRequest request)
     {
         if (!TryValidateInput(request.Input, out var error)) return BadRequest(ApiResult<HashResult>.Fail(error));
-        try { return Ok(ApiResult<HashResult>.Ok(hashService.Compute(request.Input!, request.Algorithm))); }
+        if (request.Key?.Length > 100_000) return BadRequest(ApiResult<HashResult>.Fail("The HMAC key cannot exceed 100,000 characters."));
+        try { return Ok(ApiResult<HashResult>.Ok(hashService.Compute(request.Input!, request.Algorithm, request.Key))); }
         catch (ArgumentException ex) { return BadRequest(ApiResult<HashResult>.Fail(ex.Message)); }
+        catch (PlatformNotSupportedException ex) { return BadRequest(ApiResult<HashResult>.Fail(ex.Message)); }
     }
 
     [HttpPost("format")]

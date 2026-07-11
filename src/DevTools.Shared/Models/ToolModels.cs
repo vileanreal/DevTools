@@ -1,6 +1,6 @@
 namespace DevTools.Shared.Models;
 
-public sealed record HashRequest(string? Input, string Algorithm = "SHA256");
+public sealed record HashRequest(string? Input, string Algorithm = "SHA256", string? Key = null);
 
 public sealed record HashResult(string Algorithm, string Value, int InputLength);
 
