@@ -32,6 +32,7 @@ Dependencies point inward: Web -> Application -> Shared. Web may also reference 
 
 ## Engineering Rules
 
+- Use `main` as the only working branch. Commit and push directly to `main`; do not create feature branches or pull requests unless the user explicitly requests one.
 - Apply SOLID principles: focused types, dependency injection, small interfaces, and extension through new services rather than large switch-heavy controllers.
 - Put reusable models in `DevTools.Shared/Models` and reusable stateless helpers in `DevTools.Shared/Helpers`.
 - Validate all input at the boundary and return useful, safe error messages. Never expose stack traces to the browser.
