@@ -111,7 +111,7 @@ public sealed class SqlDocService(DevToolsDbContext database, IWebHostEnvironmen
         schema = FilterSchema(schema, request);
         var content = BuildDocx(schema, request);
         var safeName = SafeFileName(schema.SourceName);
-        return (content, $"{safeName}.docx");
+        return (content, safeName.EndsWith(".docx", StringComparison.OrdinalIgnoreCase) ? safeName : $"{safeName}.docx");
     }
 
     public async Task<IReadOnlyList<SqlDocDiagramDto>> ListDiagramsAsync(int sourceId, CancellationToken cancellationToken) =>
@@ -301,6 +301,82 @@ public sealed class SqlDocService(DevToolsDbContext database, IWebHostEnvironmen
             .OrderBy(item => item.Schema).ThenBy(item => item.TableName).ThenBy(item => item.Name).ToList();
 
         return new SqlDocSchema(source.Id, source.Name, providerLabel, databaseName, tables, views, procedures, functions, indexes);
+    }
+
+    private async Task<SqlDocSchema> ReadExternalSchemaSectionAsync(SqlDocSource source, string section, CancellationToken cancellationToken)
+    {
+        await using var connection = CreateProviderConnection(source.Provider, source.ConnectionString);
+        await connection.OpenAsync(cancellationToken);
+        var databaseName = await TryScalarAsync(connection, DatabaseNameSql(source.Provider), cancellationToken) ?? source.Name;
+        var tables = new List<SqlDocTable>();
+        var views = new List<SqlDocView>();
+        var procedures = new List<SqlDocRoutine>();
+        var functions = new List<SqlDocRoutine>();
+        var indexes = new List<SqlDocIndex>();
+
+        if (section == "tables")
+        {
+            var tableRows = await ReadRowsAsync(connection, InformationSchemaTablesSql(source.Provider), cancellationToken);
+            var columnRows = await ReadRowsAsync(connection, InformationSchemaColumnsSql(source.Provider), cancellationToken);
+            var primaryKeys = await ReadRowsAsync(connection, InformationSchemaPrimaryKeysSql(source.Provider), cancellationToken);
+            var foreignKeyRows = await TryReadRowsAsync(connection, InformationSchemaForeignKeysSql(source.Provider), cancellationToken);
+            var pkSet = primaryKeys.Select(row => $"{row["schema_name"]}.{row["object_name"]}.{row["column_name"]}").ToHashSet(StringComparer.OrdinalIgnoreCase);
+            tables = tableRows.Select(row =>
+            {
+                var schema = row["schema_name"];
+                var name = row["name"];
+                var columns = columnRows.Where(column => column["schema_name"].Equals(schema, StringComparison.OrdinalIgnoreCase) && column["object_name"].Equals(name, StringComparison.OrdinalIgnoreCase))
+                    .Select(column => new SqlDocColumn(column["name"], column["type_name"], column["nullable"].Equals("YES", StringComparison.OrdinalIgnoreCase), pkSet.Contains($"{schema}.{name}.{column["name"]}"), EmptyToNull(column["default_value"]))).ToList();
+                var foreignKeys = foreignKeyRows.Where(fk => fk["schema_name"].Equals(schema, StringComparison.OrdinalIgnoreCase) && fk["object_name"].Equals(name, StringComparison.OrdinalIgnoreCase))
+                    .Select(fk => new SqlDocForeignKey(fk["name"], fk["column_name"], $"{fk["ref_schema"]}.{fk["ref_table"]}", fk["ref_column"])).ToList();
+                return new SqlDocTable(schema, name, columns, foreignKeys);
+            }).ToList();
+        }
+        else if (section == "views")
+        {
+            var rows = await ReadRowsAsync(connection, InformationSchemaViewsSql(source.Provider), cancellationToken);
+            views = rows.Select(row => new SqlDocView(row["schema_name"], row["name"], EmptyToNull(row["definition"]))).ToList();
+        }
+        else if (section is "stored-procedures" or "functions")
+        {
+            var rows = await TryReadRowsAsync(connection, InformationSchemaRoutinesSql(source.Provider), cancellationToken);
+            if (section == "stored-procedures") procedures = rows.Where(row => row["routine_type"].Contains("PROCEDURE", StringComparison.OrdinalIgnoreCase)).Select(row => new SqlDocRoutine(row["schema_name"], row["name"], EmptyToNull(row["definition"]))).ToList();
+            else functions = rows.Where(row => row["routine_type"].Contains("FUNCTION", StringComparison.OrdinalIgnoreCase)).Select(row => new SqlDocRoutine(row["schema_name"], row["name"], EmptyToNull(row["definition"]))).ToList();
+        }
+        else if (section == "indexes")
+        {
+            var rows = await TryReadRowsAsync(connection, InformationSchemaIndexesSql(source.Provider), cancellationToken);
+            indexes = rows.GroupBy(row => $"{row["schema_name"]}\u001f{row["object_name"]}\u001f{row["name"]}\u001f{row["unique_value"]}", StringComparer.OrdinalIgnoreCase)
+                .Select(group =>
+                {
+                    var first = group.First();
+                    return new SqlDocIndex(first["schema_name"], first["object_name"], first["name"], first["unique_value"].Equals("true", StringComparison.OrdinalIgnoreCase) || first["unique_value"] == "1", group.Select(row => row["column_name"]).Where(column => column.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToList());
+                }).OrderBy(item => item.Schema).ThenBy(item => item.TableName).ThenBy(item => item.Name).ToList();
+        }
+
+        return new SqlDocSchema(source.Id, source.Name, ProviderLabel(source.Provider), databaseName, tables, views, procedures, functions, indexes);
+    }
+
+    private static (string Tables, string Views, string Procedures, string Functions, string Indexes) OverviewCountSql(string provider) => provider.ToLowerInvariant() switch
+    {
+        "sqlite" => (
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'",
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='view'",
+            "SELECT 0", "SELECT 0",
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name NOT LIKE 'sqlite_autoindex_%'"),
+        "sqlserver" => ("SELECT COUNT(*) FROM sys.tables", "SELECT COUNT(*) FROM sys.views", "SELECT COUNT(*) FROM sys.procedures", "SELECT COUNT(*) FROM sys.objects WHERE type IN ('FN','IF','TF','FS','FT')", "SELECT COUNT(*) FROM sys.indexes WHERE name IS NOT NULL"),
+        "mysql" => ("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_type='BASE TABLE'", "SELECT COUNT(*) FROM information_schema.views WHERE table_schema=DATABASE()", "SELECT COUNT(*) FROM information_schema.routines WHERE routine_schema=DATABASE() AND routine_type='PROCEDURE'", "SELECT COUNT(*) FROM information_schema.routines WHERE routine_schema=DATABASE() AND routine_type='FUNCTION'", "SELECT COUNT(DISTINCT index_name) FROM information_schema.statistics WHERE table_schema=DATABASE()"),
+        "postgresql" => ("SELECT COUNT(*) FROM information_schema.tables WHERE table_type='BASE TABLE' AND table_schema NOT IN ('information_schema','pg_catalog')", "SELECT COUNT(*) FROM information_schema.views WHERE table_schema NOT IN ('information_schema','pg_catalog')", "SELECT COUNT(*) FROM information_schema.routines WHERE routine_schema NOT IN ('information_schema','pg_catalog') AND routine_type='PROCEDURE'", "SELECT COUNT(*) FROM information_schema.routines WHERE routine_schema NOT IN ('information_schema','pg_catalog') AND routine_type='FUNCTION'", "SELECT COUNT(*) FROM pg_indexes WHERE schemaname NOT IN ('pg_catalog','information_schema')"),
+        "oracle" => ("SELECT COUNT(*) FROM all_tables WHERE owner NOT IN ('SYS','SYSTEM')", "SELECT COUNT(*) FROM all_views WHERE owner NOT IN ('SYS','SYSTEM')", "SELECT COUNT(*) FROM all_objects WHERE object_type='PROCEDURE' AND owner NOT IN ('SYS','SYSTEM')", "SELECT COUNT(*) FROM all_objects WHERE object_type='FUNCTION' AND owner NOT IN ('SYS','SYSTEM')", "SELECT COUNT(*) FROM all_indexes WHERE owner NOT IN ('SYS','SYSTEM')"),
+        _ => ("SELECT 0", "SELECT 0", "SELECT 0", "SELECT 0", "SELECT 0")
+    };
+
+    private static async Task<int> CountAsync(DbConnection connection, string sql, CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        var value = await command.ExecuteScalarAsync(cancellationToken);
+        return value is null or DBNull ? 0 : Convert.ToInt32(value, CultureInfo.InvariantCulture);
     }
 
     private static DbConnection CreateProviderConnection(string provider, string connectionString)

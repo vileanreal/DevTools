@@ -14,6 +14,14 @@ DevTools is a privacy-friendly ASP.NET Core web application containing focused u
 - SQLite via Entity Framework Core. Database paths come from the `DatabasePaths` section in `src/DevTools.Web/appsettings.json`; relative paths resolve from the web content root. Configuration and SQL Doc data use `ConfigurationDatabase`, while the rebuildable System Logs index uses the independently deletable `LogIndexDatabase`.
 - Optional cookie authentication is enabled by `Login:UseLogin` in `appsettings.json`. Unsalted SHA-256 credential hashes come from the ignored `src/DevTools.Web/.env` file through `Login__UsernameSha256` and `Login__PasswordSha256`. When login is enabled, the fallback authorization policy protects all MVC and API endpoints except the login page and static assets. Credentials must never be logged.
 
+## Hosting and Deployment
+
+- Local `dotnet run` uses the Development environment and `appsettings.Development.json`, which clears `Hosting:PathBase`; local routes, login redirects, cookies, assets, and APIs therefore run from `/`.
+- The committed Production configuration mounts the application at `/DevTools`. Login redirects to `/DevTools/`, and the authentication cookie path is `/DevTools`.
+- Always deploy the complete output of `dotnet publish src/DevTools.Web -c Release -o <target>`. Do not deploy the project directory or `bin/Release`; generated static assets such as `DevTools.Web.styles.css` are materialized correctly only in the publish output.
+- For IIS, place `.env` beside `DevTools.Web.dll` in the publish directory, install the .NET 9 Hosting Bundle, and grant the application-pool identity read/execute access plus write access to configured SQLite directories.
+- Keep IIS in Production unless intentionally debugging locally. Browser-facing error pages must remain environment-neutral and must never recommend enabling Development on a deployed server.
+
 ## Architecture
 
 - `src/DevTools.Web`: composition root, MVC controllers, views, and static assets. Keep controllers thin.
@@ -38,7 +46,10 @@ Dependencies point inward: Web -> Application -> Shared. Web may also reference 
 - Keep JavaScript framework-free unless application complexity clearly justifies a change.
 - New tools should include a shared contract, an application service interface/implementation, a thin endpoint, and a workbench UI panel.
 - Every toolbox entry must have its own route, Razor partial component, and isolated `*-tool.js` script. Shared navigation/toast behavior belongs in `site.js`.
+- Client-side requests and navigation must use the shared `appUrl`/`jsonRequest` helpers or ASP.NET Core URL generation so the application works both at `/` and under an IIS application path such as `/DevTools`.
+- The optional `Hosting:PathBase` setting forces the deployment mount path when IIS or a reverse proxy doesn't populate `Request.PathBase`; leave it empty for root hosting.
+- Client-generated IDs must not depend solely on secure-context-only browser APIs such as `crypto.randomUUID()`. Use the shared `createUuid` helper so tools continue to work over an internal HTTP deployment.
 
 ## Verification
 
-Run `dotnet build DevTools.sln` after changes. Add unit tests for parsing, transformations, validation, and edge cases as the toolset grows.
+Run `dotnet build DevTools.sln` after changes. For hosting or path changes, also publish to a clean directory and verify both Development at `/` and Production at `/DevTools`: login form action, successful and failed login, authentication cookie path, protected MVC redirects, anonymous API `401` responses, tool routes, static assets, and API calls. Add unit tests for parsing, transformations, validation, and edge cases as the toolset grows.

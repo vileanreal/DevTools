@@ -1,16 +1,49 @@
 (() => {
   const byId = id => document.getElementById(id);
   const escapeHtml = value => String(value).replace(/[&<>'"]/g, character => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' })[character]);
+  const configuredBasePath = document.querySelector('meta[name="app-base"]')?.content || '/';
+  const routeMarker = ['/tools/', '/account/'].find(marker => location.pathname.toLowerCase().includes(marker));
+  const routeBasePath = routeMarker
+    ? `${location.pathname.slice(0, location.pathname.toLowerCase().indexOf(routeMarker))}/`
+    : '/';
+  const basePath = configuredBasePath !== '/' ? configuredBasePath : routeBasePath;
+  const appUrl = path => {
+    const value = String(path || '');
+    if (/^(?:[a-z]+:)?\/\//i.test(value)) return value;
+    return `${basePath.replace(/\/$/, '')}/${value.replace(/^\//, '')}`;
+  };
+  const createUuid = () => {
+    const cryptoApi = window.crypto || window.msCrypto;
+    if (typeof cryptoApi?.randomUUID === 'function') return cryptoApi.randomUUID();
+
+    const bytes = new Uint8Array(16);
+    if (typeof cryptoApi?.getRandomValues === 'function') {
+      cryptoApi.getRandomValues(bytes);
+    } else {
+      let seed = Date.now() ^ Math.floor((window.performance?.now() || 0) * 1000);
+      for (let index = 0; index < bytes.length; index += 1) {
+        seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+        bytes[index] = (seed >>> ((index % 4) * 8)) ^ Math.floor(Math.random() * 256);
+      }
+    }
+
+    // Produce a standards-shaped UUID v4. Diagram IDs only require local
+    // uniqueness; authentication and other security features never use this fallback.
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    const hex = Array.from(bytes, value => value.toString(16).padStart(2, '0'));
+    return `${hex.slice(0, 4).join('')}-${hex.slice(4, 6).join('')}-${hex.slice(6, 8).join('')}-${hex.slice(8, 10).join('')}-${hex.slice(10).join('')}`;
+  };
   const toastElement = byId('app-toast');
   const toast = toastElement ? bootstrap.Toast.getOrCreateInstance(toastElement, { delay: 2500 }) : null;
   const notify = (message, error = false) => { if (!toastElement) return; toastElement.querySelector('.toast-body').textContent = message; toastElement.classList.toggle('text-bg-danger', error); toast.show(); };
   const jsonRequest = async (url, method = 'GET', body = null) => {
     const options = { method, headers: {} };
     if (body !== null) { options.headers['Content-Type'] = 'application/json'; options.body = JSON.stringify(body); }
-    const response = await fetch(url, options);
+    const response = await fetch(appUrl(url), options);
     if (response.status === 401) {
       const returnUrl = encodeURIComponent(`${location.pathname}${location.search}`);
-      location.assign(`/account/login?returnUrl=${returnUrl}`);
+      location.assign(`${appUrl('account/login')}?returnUrl=${returnUrl}`);
       throw new Error('Your session has expired.');
     }
     if (response.status === 204) return null;
@@ -70,7 +103,7 @@
     }
     return output + escapeHtml(source.slice(cursor));
   };
-  window.devTools = { byId, escapeHtml, notify, jsonRequest, highlightSyntax };
+  window.devTools = { byId, escapeHtml, notify, jsonRequest, highlightSyntax, appUrl, createUuid };
 
   const themeToggle = byId('theme-toggle');
   const applyTheme = theme => {

@@ -15,6 +15,7 @@ DotEnvLoader.LoadFirstExisting(
     Path.Combine(AppContext.BaseDirectory, ".env"));
 
 var builder = WebApplication.CreateBuilder(args);
+var configuredPathBase = builder.Configuration["Hosting:PathBase"]?.Trim();
 
 var configurationDatabasePath = ResolveDatabasePath(
     builder.Configuration["DatabasePaths:ConfigurationDatabase"],
@@ -112,7 +113,17 @@ using (var scope = app.Services.CreateScope())
     LogIndexDatabaseInitializer.Initialize(scope.ServiceProvider.GetRequiredService<LogIndexDbContext>());
 }
 
-// Configure the HTTP request pipeline.
+// Establish the deployment base path before diagnostics, static files, routing, and authentication.
+if (!string.IsNullOrWhiteSpace(configuredPathBase))
+{
+    app.UsePathBase(configuredPathBase);
+    app.Use((context, next) =>
+    {
+        if (!context.Request.PathBase.HasValue)
+            context.Request.PathBase = configuredPathBase;
+        return next(context);
+    });
+}
 if (!app.Environment.IsDevelopment())
 {
     app.UseExceptionHandler("/Home/Error");
