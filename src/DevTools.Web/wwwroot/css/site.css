@@ -330,6 +330,58 @@ html[data-theme="dark"] .login-card { box-shadow:0 20px 55px rgba(0,0,0,.28); }
 .office-section-heading { display:flex; align-items:end; justify-content:space-between; min-height:36px; margin-bottom:.75rem; }
 .office-section-heading h2 { margin:0; font-size:1rem; font-weight:750; color:var(--ink); }
 .office-section-heading span { display:block; margin-top:.1rem; color:var(--muted); font-size:.72rem; }
+
+/* SQL Doc object categories */
+.sql-object-browser {
+  display:block;
+  margin-top:1rem;
+  border:1px solid var(--line);
+  border-radius:10px;
+  background:var(--surface);
+  overflow:hidden;
+}
+.sql-object-browser-heading { margin:0; padding:.8rem 1rem; background:color-mix(in srgb,var(--brand) 14%,var(--surface)); border-bottom:1px solid color-mix(in srgb,var(--brand) 28%,var(--line)); }
+.sql-object-browser-heading h2 { color:var(--ink); }
+.sql-object-browser-content { display:flex; flex-direction:column; gap:1rem; padding:1rem; }
+.sql-object-category { overflow:hidden; border:1px solid var(--line); border-radius:8px; background:var(--surface); }
+.sql-object-category > summary { display:flex; align-items:center; justify-content:space-between; min-height:44px; padding:.65rem .8rem; cursor:pointer; background:color-mix(in srgb,var(--brand) 18%,var(--surface-soft)); color:var(--ink); font-weight:750; list-style:none; }
+.sql-object-category > summary::-webkit-details-marker { display:none; }
+.sql-object-category > summary::before { content:'›'; margin-right:.55rem; color:var(--brand-dark); font-size:1.1rem; transition:transform .15s ease; }
+.sql-object-category[open] > summary::before { transform:rotate(90deg); }
+.sql-object-category > summary > span { flex:1; }
+.sql-object-category > summary small { color:var(--brand-dark); font-size:.7rem; }
+.sql-object-category-content { border-top:1px solid color-mix(in srgb,var(--brand) 30%,var(--line)); }
+.sql-object-row { display:flex; width:100%; min-height:44px; align-items:center; justify-content:space-between; gap:1rem; padding:.55rem .8rem; border:0; border-bottom:1px solid var(--line); background:var(--surface); color:var(--ink); text-align:left; }
+.sql-object-row:last-child { border-bottom:0; }
+.sql-object-row:hover { background:var(--surface-hover); }
+.sql-object-title { display:flex; min-width:0; flex-direction:column; align-items:flex-start; }
+.sql-object-title strong { max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--ink); }
+.sql-object-title small { color:var(--muted); font-size:.7rem; }
+.sql-object-loading { min-height:76px; display:flex; align-items:center; justify-content:center; gap:.55rem; color:var(--muted); font-size:.78rem; }
+.sql-database-loading { min-height:320px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:.65rem; color:var(--ink); text-align:center; }
+.sql-database-loading > span:last-child { max-width:420px; color:var(--muted); font-size:.8rem; }
+.sql-source-row.is-loading { opacity:1; cursor:wait; }
+.sql-source-spinner { color:var(--brand); }
+.diagram-blank-state {
+  position:absolute;
+  left:50%;
+  top:50%;
+  display:flex;
+  width:min(360px,calc(100% - 2rem));
+  flex-direction:column;
+  align-items:center;
+  gap:.45rem;
+  padding:1.25rem;
+  transform:translate(-50%,-50%);
+  border:1px dashed var(--line);
+  border-radius:12px;
+  background:var(--surface);
+  color:var(--ink);
+  text-align:center;
+  pointer-events:auto;
+}
+.diagram-blank-state span { color:var(--muted); font-size:.8rem; }
+html[data-theme="dark"] .diagram-blank-state { background:var(--surface); }
 .office-tool-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(210px,1fr)); gap:.65rem; }
 .office-tool-tile { --tile:#0f766e; --tile-dark:#0a5f59; position:relative; min-height:142px; display:flex; flex-direction:column; justify-content:space-between; overflow:hidden; color:#fff; background:linear-gradient(135deg,var(--tile),var(--tile-dark)); text-decoration:none; border:1px solid color-mix(in srgb,var(--tile) 80%,#fff); border-radius:4px; box-shadow:0 8px 22px color-mix(in srgb,var(--tile) 18%,transparent); transition:transform .16s ease,box-shadow .16s ease,filter .16s ease; }
 .office-tool-tile::after { content:""; position:absolute; width:125px; height:125px; right:-46px; top:-58px; border:18px solid rgba(255,255,255,.08); border-radius:50%; }

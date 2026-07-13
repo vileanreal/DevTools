@@ -79,7 +79,7 @@
             <tr>
                 @if(Has("timestamp")){<td><time datetime="@entry.Timestamp.ToString("O")">@entry.Timestamp.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")</time>@if(entry.TimestampSource != "content"){<span class="timestamp-origin" title="Timestamp derived from @(entry.TimestampSource == "filename" ? "the filename" : "file modified time")">*</span>}</td>}
                 @if(Has("module")){<td><strong>@entry.ModuleName</strong></td>}
-                @if(Has("file")){<td class="file-cell" title="@entry.FileName"><a class="file-download-link" href="/api/system-logs/systems/@Model.SystemId/entries/@entry.Id/file">@entry.FileName</a></td>}
+                @if(Has("file")){<td class="file-cell" title="@entry.FileName"><a class="file-download-link" href="@Url.Action("DownloadLogFile", "SystemLogs", new { systemId = Model.SystemId, entryId = entry.Id })">@entry.FileName</a></td>}
                 @if(Has("level")){<td><span class="level-pill level-@entry.Level.ToLowerInvariant()">@entry.Level</span></td>}
                 @if(Has("message")){<td class="log-message-cell @(entry.Level is "ERROR" or "FATAL" ? "log-message-error" : null)"><span class="log-message-preview">@entry.MessagePreview</span>@if(entry.IsTruncated){<button class="view-message" type="button" data-entry-id="@entry.Id">View more</button>}</td>}
             </tr>

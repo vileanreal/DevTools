@@ -57,6 +57,24 @@ dotnet build DevTools.sln
 
 Configuration is stored in `src/DevTools.Web/appsettings.json`.
 
+For an IIS sub-application hosted at `http://server/DevTools`, configure:
+
+```json
+"Hosting": {
+  "PathBase": "/DevTools"
+}
+```
+
+Leave `PathBase` empty when hosting DevTools at the website root.
+
+For a repeatable IIS deployment, run PowerShell as Administrator from the repository root:
+
+```powershell
+.\scripts\Deploy-Iis.ps1
+```
+
+The script publishes a complete Release build, stops the `DevTools` application pool, preserves the destination `.env` and SQLite files, copies all runtime/static assets, reapplies inherited application-pool permissions, verifies required resources, and restarts the pool. Override `-AppPoolName`, `-Destination`, or `-PublishDirectory` when your IIS names or paths differ.
+
 ### SQLite paths
 
 ```json

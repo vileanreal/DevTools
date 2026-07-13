@@ -1,9 +1,9 @@
 (() => {
-  const { byId, escapeHtml, notify, jsonRequest, highlightSyntax } = window.devTools;
+  const { byId, escapeHtml, notify, jsonRequest, highlightSyntax, appUrl, createUuid } = window.devTools;
   const modal = bootstrap.Modal.getOrCreateInstance(byId('sql-source-modal'));
   const diagramObjectsModal = bootstrap.Modal.getOrCreateInstance(byId('sql-diagram-objects-modal'));
   const providerLabels = { sqlserver:'SQL Server', sqlite:'SQLite', mysql:'MySQL', oracle:'Oracle', postgresql:'PostgreSQL' };
-  let sources = [], selectedSourceId = null, selectedSchema = null, activeTab = 'details';
+  let sources = [], selectedSourceId = null, selectedSchema = null, activeTab = 'details', loadingSourceId = null;
   let diagram = null, savedDiagrams = [], selectedNodeId = null, selectedEdgeId = null, connectDraft = null, dragState = null, edgeDragState = null, panState = null, diagramResizeObserver = null, diagramResizeFrame = null;
   const DIAGRAM_PADDING = 180;
   const DIAGRAM_VIEWPORT_BUFFER = 64;
@@ -26,11 +26,11 @@
 
   const renderSources = () => {
     byId('sql-source-list').innerHTML = sources.length ? sources.map(source => `
-      <button class="sql-source-row ${source.id === selectedSourceId ? 'active' : ''}" data-source-id="${source.id}">
+      <button class="sql-source-row ${source.id === selectedSourceId ? 'active' : ''} ${source.id === loadingSourceId ? 'is-loading' : ''}" data-source-id="${source.id}" ${loadingSourceId !== null ? 'disabled' : ''}>
         <span class="system-avatar">${escapeHtml(source.name.charAt(0).toUpperCase())}</span>
         <span class="system-row-main"><strong>${escapeHtml(source.name)}</strong><small>${escapeHtml(providerLabels[source.provider] || source.provider)}</small></span>
         <span class="sql-source-database">${escapeHtml(connectionSummary(source.connectionString))}</span>
-        <span class="row-arrow">›</span>
+        ${source.id === loadingSourceId ? '<span class="spinner-border spinner-border-sm sql-source-spinner" role="status" aria-label="Loading database"></span>' : '<span class="row-arrow">›</span>'}
       </button>`).join('') : '<div class="empty-state">No database sources yet.</div>';
     document.querySelectorAll('.sql-source-row').forEach(button => button.addEventListener('click', () => inspectSource(Number(button.dataset.sourceId))));
   };
@@ -43,16 +43,23 @@
     selectedNodeId = null;
     selectedEdgeId = null;
     connectDraft = null;
+    loadingSourceId = id;
     renderSources();
-    byId('sql-doc-workspace').innerHTML = '<div class="empty-state">Inspecting database objects...</div>';
+    byId('sql-doc-workspace').innerHTML = '<div class="sql-database-loading" role="status"><span class="spinner-border text-primary" aria-hidden="true"></span><strong>Loading database</strong><span>Inspecting objects and schema details. Large databases may take a moment.</span></div>';
     try {
       selectedSchema = await jsonRequest(`/api/sql-doc/sources/${id}/schema`);
       savedDiagrams = await jsonRequest(`/api/sql-doc/sources/${id}/diagrams`);
-      diagram = normalizeDiagram(savedDiagrams[0] ? JSON.parse(savedDiagrams[0].diagramJson) : createDefaultDiagram(selectedSchema));
+      // Keep the initial canvas light even when a source has a large schema. Saved
+      // diagrams remain available from the diagram dropdown and load on demand.
+      diagram = createEmptyDiagram();
       diagram.zoom = zoomLevel();
       diagram.name = diagram.name || savedDiagrams[0]?.name || 'Default diagram';
+      loadingSourceId = null;
+      renderSources();
       renderSchema();
     } catch (error) {
+      loadingSourceId = null;
+      renderSources();
       const source = selectedSource();
       byId('sql-doc-workspace').innerHTML = `
         <div class="sql-doc-header">
@@ -97,14 +104,24 @@
         ${renderObjectScopeSelector('sql-doc', documentObjectGroups(schema))}
       </div>
     </section>
-    <section class="sql-object-browser">
-      <div class="section-heading"><div><h2>Objects</h2><p>Tables include columns, keys, and relationships.</p></div></div>
-      ${renderTables(schema.tables)}
-      ${renderSimpleObjects('Views', schema.views)}
-      ${renderSimpleObjects('Stored procedures', schema.storedProcedures)}
-      ${renderSimpleObjects('Functions', schema.functions)}
-      ${renderIndexes(schema.indexes)}
+    <section id="sql-object-browser" class="sql-object-browser">
+      <div class="section-heading sql-object-browser-heading"><div><h2>Objects</h2><p>Expand an object type to view its database objects.</p></div></div>
+      <div id="sql-object-browser-content" class="sql-object-browser-content">${renderObjectBrowserContent(schema)}</div>
     </section>`;
+
+  const objectSections = schema => [
+    { key:'tables', label:'Tables', count:schema.tables.length },
+    { key:'views', label:'Views', count:schema.views.length },
+    { key:'stored-procedures', label:'Stored Procedures', count:schema.storedProcedures.length },
+    { key:'functions', label:'Functions', count:schema.functions.length },
+    { key:'indexes', label:'Indexes', count:schema.indexes.length }
+  ];
+
+  const renderObjectBrowserContent = schema => objectSections(schema).map(section => `
+    <details class="sql-object-category" data-object-section="${section.key}">
+      <summary><span>${escapeHtml(section.label)}</span><small>${Number(section.count || 0).toLocaleString()}</small></summary>
+      <div class="sql-object-category-content">${renderObjectSectionRows(section.key)}</div>
+    </details>`).join('');
 
   const renderDiagramComponent = () => `
     <div class="sql-diagram-shell">
@@ -123,7 +140,7 @@
           <button id="sql-diagram-fullscreen" class="btn btn-outline-secondary btn-sm">Fullscreen</button>
           <button id="sql-diagram-choose-objects" class="btn btn-outline-secondary btn-sm">Choose objects</button>
           <button id="sql-diagram-add-table" class="btn btn-outline-secondary btn-sm">+ Table</button>
-          <button id="sql-diagram-reset" class="btn btn-ghost btn-sm">Reset from DB</button>
+          <button id="sql-diagram-reset" class="btn btn-ghost btn-sm">Clear canvas</button>
         </div>
       </div>
       <div class="sql-diagram-help">Drag tables to arrange. Drag a side handle to another table or column to connect it. Select a connector anywhere along its line, then drag the blue segment midpoint to reshape it.</div>
@@ -136,16 +153,18 @@
       </div>
     </div>`;
 
-  const renderTables = tables => tables.length ? `<div class="sql-object-group"><h3>Tables</h3>${tables.map(table => `
-    <details class="sql-object">
-      <summary><strong>${escapeHtml(qualified(table.schema, table.name))}</strong><span>${table.columns.length} columns · ${table.foreignKeys.length} FKs</span></summary>
-      <div class="table-responsive"><table class="table log-table"><thead><tr><th>Column</th><th>Type</th><th>Nullable</th><th>PK</th><th>Default</th></tr></thead><tbody>${table.columns.map(column => `<tr><td><strong>${escapeHtml(column.name)}</strong></td><td>${escapeHtml(column.dataType)}</td><td>${column.isNullable ? 'Yes' : 'No'}</td><td>${column.isPrimaryKey ? 'Yes' : ''}</td><td>${escapeHtml(column.defaultValue || '')}</td></tr>`).join('')}</tbody></table></div>
-      ${table.foreignKeys.length ? `<div class="sql-fk-list">${table.foreignKeys.map(fk => `<span>${escapeHtml(fk.columnName)} → ${escapeHtml(fk.referencedTable)}.${escapeHtml(fk.referencedColumn)}</span>`).join('')}</div>` : ''}
-    </details>`).join('')}</div>` : '';
+  const renderObjectRow = (kind, index, title, meta = '') => `
+    <button class="sql-object-row" type="button" data-object-kind="${kind}" data-object-index="${index}">
+      <span class="sql-object-title"><strong>${escapeHtml(title)}</strong>${meta ? `<small>${escapeHtml(meta)}</small>` : ''}</span><span class="row-arrow">›</span>
+    </button>`;
 
-  const renderSimpleObjects = (title, objects) => objects.length ? `<div class="sql-object-group"><h3>${escapeHtml(title)}</h3>${objects.map(item => `<details class="sql-object"><summary><strong>${escapeHtml(qualified(item.schema, item.name))}</strong></summary>${item.definition ? `<pre>${escapeHtml(item.definition)}</pre>` : '<p class="text-muted small mb-0 p-3">No definition returned by provider.</p>'}</details>`).join('')}</div>` : '';
-
-  const renderIndexes = indexes => indexes.length ? `<div class="sql-object-group"><h3>Indexes</h3><div class="table-responsive"><table class="table log-table"><thead><tr><th>Table</th><th>Index</th><th>Unique</th><th>Columns</th></tr></thead><tbody>${indexes.map(index => `<tr><td>${escapeHtml(qualified(index.schema, index.tableName))}</td><td><strong>${escapeHtml(index.name)}</strong></td><td>${index.isUnique ? 'Yes' : 'No'}</td><td>${escapeHtml(index.columns.join(', '))}</td></tr>`).join('')}</tbody></table></div></div>` : '';
+  const renderObjectSectionRows = section => {
+    if (section === 'tables') return selectedSchema.tables.map((table, index) => renderObjectRow('table', index, qualified(table.schema, table.name), `${table.columns.length} columns · ${table.foreignKeys.length} FKs`)).join('');
+    if (section === 'views') return selectedSchema.views.map((item, index) => renderObjectRow('view', index, qualified(item.schema, item.name))).join('');
+    if (section === 'stored-procedures') return selectedSchema.storedProcedures.map((item, index) => renderObjectRow('stored-procedure', index, qualified(item.schema, item.name))).join('');
+    if (section === 'functions') return selectedSchema.functions.map((item, index) => renderObjectRow('function', index, qualified(item.schema, item.name))).join('');
+    return selectedSchema.indexes.map((item, index) => renderObjectRow('index', index, item.name, qualified(item.schema, item.tableName))).join('');
+  };
 
   const documentObjectGroups = schema => [
     { type:'tables', label:'Tables', items:schema.tables.map(item => ({ value:`table:${qualified(item.schema, item.name)}`, label:qualified(item.schema, item.name), meta:`${item.columns.length} columns` })) },
@@ -173,7 +192,7 @@
           return `<div class="object-tree-group" data-object-group="${escapeHtml(group.type)}">
             <div class="object-tree-group-header">
               <button class="object-tree-expander" type="button" aria-expanded="false" aria-label="Expand ${escapeHtml(group.label)}">+</button>
-              <label><input class="form-check-input object-tree-group-input" type="checkbox" ${groupChecked ? 'checked' : ''} ${group.items.length ? '' : 'disabled'}> <span class="object-tree-folder" aria-hidden="true">▱</span><strong>${escapeHtml(group.label)}</strong><small>${group.items.length.toLocaleString()}</small></label>
+              <label><input class="form-check-input object-tree-group-input" type="checkbox" ${groupChecked ? 'checked' : ''} ${group.items.length ? '' : 'disabled'}> <span class="object-tree-folder" aria-hidden="true">▱</span><strong>${escapeHtml(group.label)}</strong><small>${Number(group.count ?? group.items.length).toLocaleString()}</small></label>
             </div>
             <div class="object-tree-children d-none">${group.items.length ? group.items.map(item => `<label class="object-tree-item"><input class="form-check-input object-tree-item-input" type="checkbox" value="${escapeHtml(item.value)}" ${selected.has(item.value) ? 'checked' : ''}><span>${escapeHtml(item.label)}</span>${item.meta ? `<small>${escapeHtml(item.meta)}</small>` : ''}</label>`).join('') : '<div class="object-tree-empty">No objects</div>'}</div>
           </div>`;
@@ -198,7 +217,13 @@
     byId('sql-source-delete')?.addEventListener('click', deleteSelectedSource);
     byId('sql-doc-download')?.addEventListener('click', downloadDocx);
     bindObjectScopeSelector('sql-doc');
-    document.querySelectorAll('.sql-object summary').forEach(summary => summary.addEventListener('click', openObjectModal));
+    bindObjectBrowser();
+  };
+
+  const bindObjectBrowser = () => {
+    const browser = byId('sql-object-browser');
+    if (!browser) return;
+    browser.querySelectorAll('.sql-object-row').forEach(row => row.addEventListener('click', openObjectModal));
   };
 
   const bindObjectScopeSelector = prefix => {
@@ -252,14 +277,26 @@
   };
 
   const openObjectModal = event => {
-    event.preventDefault();
-    const summary = event.currentTarget;
-    const details = summary.closest('.sql-object');
-    const title = summary.querySelector('strong')?.textContent || 'Object details';
-    const body = [...details.children].filter(child => child !== summary).map(child => child.outerHTML).join('') || '<p class="text-muted">No details available.</p>';
+    const row = event.currentTarget;
+    const index = Number(row.dataset.objectIndex);
+    const kind = row.dataset.objectKind;
+    let item = null, body = '';
+    if (kind === 'table') {
+      item = selectedSchema.tables[index];
+      if (item) body = `<div class="table-responsive"><table class="table log-table"><thead><tr><th>Column</th><th>Type</th><th>Nullable</th><th>PK</th><th>Default</th></tr></thead><tbody>${item.columns.map(column => `<tr><td><strong>${escapeHtml(column.name)}</strong></td><td>${escapeHtml(column.dataType)}</td><td>${column.isNullable ? 'Yes' : 'No'}</td><td>${column.isPrimaryKey ? 'Yes' : ''}</td><td>${escapeHtml(column.defaultValue || '')}</td></tr>`).join('')}</tbody></table></div>${item.foreignKeys.length ? `<div class="sql-fk-list">${item.foreignKeys.map(fk => `<span>${escapeHtml(fk.columnName)} → ${escapeHtml(fk.referencedTable)}.${escapeHtml(fk.referencedColumn)}</span>`).join('')}</div>` : ''}`;
+    } else if (kind === 'index') {
+      item = selectedSchema.indexes[index];
+      if (item) body = `<div class="table-responsive"><table class="table log-table"><tbody><tr><th>Table</th><td>${escapeHtml(qualified(item.schema, item.tableName))}</td></tr><tr><th>Unique</th><td>${item.isUnique ? 'Yes' : 'No'}</td></tr><tr><th>Columns</th><td>${escapeHtml(item.columns.join(', '))}</td></tr></tbody></table></div>`;
+    } else {
+      const collection = kind === 'view' ? selectedSchema.views : kind === 'stored-procedure' ? selectedSchema.storedProcedures : selectedSchema.functions;
+      item = collection[index];
+      if (item) body = item.definition ? `<pre>${escapeHtml(item.definition)}</pre>` : '<p class="text-muted small mb-0 p-3">No definition returned by provider.</p>';
+    }
+    if (!item) return;
+    const title = kind === 'index' ? item.name : qualified(item.schema, item.name);
     byId('sql-object-modal-title').textContent = title;
     const modalBody = byId('sql-object-modal-body');
-    modalBody.innerHTML = body;
+    modalBody.innerHTML = body || '<p class="text-muted">No details available.</p>';
     modalBody.querySelectorAll('pre').forEach(code => {
       const source = code.textContent || '';
       code.classList.add('syntax-code');
@@ -282,8 +319,8 @@
     byId('sql-diagram-choose-objects')?.addEventListener('click', openDiagramObjectSelector);
     byId('sql-diagram-add-table')?.addEventListener('click', addDiagramTable);
     byId('sql-diagram-reset')?.addEventListener('click', () => {
-      if (!confirm('Reset the diagram from current database objects? Unsaved layout changes will be lost.')) return;
-      diagram = createDefaultDiagram(selectedSchema);
+      if (!confirm('Clear every table and connector from this canvas? Unsaved layout changes will be lost.')) return;
+      diagram = createEmptyDiagram(diagram?.name);
       selectedNodeId = null;
       selectedEdgeId = null;
       connectDraft = null;
@@ -325,7 +362,7 @@
     if (!selectedSchema || !diagram) return;
     const databaseIds = new Set(selectedSchema.tables.map(table => qualified(table.schema, table.name)));
     const selected = new Set(diagram.nodes.filter(node => databaseIds.has(node.id) && !node.hidden).map(node => node.id));
-    const scope = selected.size === databaseIds.size ? 'all' : 'specific';
+    const scope = databaseIds.size > 0 && selected.size === databaseIds.size ? 'all' : 'specific';
     byId('sql-diagram-objects-body').innerHTML = renderObjectScopeSelector('sql-diagram', diagramObjectGroups(selectedSchema), selected, scope);
     bindObjectScopeSelector('sql-diagram');
     diagramObjectsModal.show();
@@ -336,18 +373,23 @@
     if (!root || !selectedSchema || !diagram) return;
     const scope = root.querySelector('input[name="sql-diagram-scope"]:checked')?.value || 'all';
     const selected = new Set([...root.querySelectorAll('.object-tree-item-input:checked')].map(input => input.value));
-    const defaults = createDefaultDiagram(selectedSchema);
-    const databaseIds = new Set(defaults.nodes.map(node => node.id));
+    const databaseIds = new Set(selectedSchema.tables.map(table => qualified(table.schema, table.name)));
+    const selectedIds = scope === 'all' ? databaseIds : selected;
+    const defaults = createDefaultDiagram(selectedSchema, selectedIds);
 
-    defaults.nodes.forEach(node => {
-      if (!nodeById(node.id)) diagram.nodes.push(node);
+    // Keep custom tables and existing positions, but do not retain thousands of
+    // unselected database nodes in memory.
+    diagram.nodes = diagram.nodes.filter(node => !databaseIds.has(node.id) || selectedIds.has(node.id));
+    defaults.nodes.filter(node => selectedIds.has(node.id)).forEach(node => {
+      const existing = nodeById(node.id);
+      if (existing) existing.hidden = false;
+      else diagram.nodes.push(node);
     });
-    defaults.edges.forEach(edge => {
+    const activeIds = new Set(diagram.nodes.map(node => node.id));
+    diagram.edges = diagram.edges.filter(edge => activeIds.has(edge.from) && activeIds.has(edge.to));
+    defaults.edges.filter(edge => selectedIds.has(edge.from) && selectedIds.has(edge.to)).forEach(edge => {
       const exists = diagram.edges.some(current => current.from === edge.from && current.to === edge.to && current.fromColumn === edge.fromColumn && current.toColumn === edge.toColumn);
       if (!exists) diagram.edges.push(edge);
-    });
-    diagram.nodes.forEach(node => {
-      if (databaseIds.has(node.id)) node.hidden = scope === 'specific' && !selected.has(node.id);
     });
     selectedNodeId = null;
     selectedEdgeId = null;
@@ -356,8 +398,11 @@
     refreshDiagramUi();
   };
 
-  const createDefaultDiagram = schema => {
-    const nodes = schema.tables.map((table, index) => {
+  const createDefaultDiagram = (schema, includedIds = null) => {
+    const includedTables = includedIds instanceof Set
+      ? schema.tables.filter(table => includedIds.has(qualified(table.schema, table.name)))
+      : schema.tables;
+    const nodes = includedTables.map((table, index) => {
       const column = index % 3, row = Math.floor(index / 3);
       const id = qualified(table.schema, table.name);
       return {
@@ -375,19 +420,28 @@
       };
     });
     const edges = [];
-    schema.tables.forEach(table => {
+    includedTables.forEach(table => {
       const from = qualified(table.schema, table.name);
       table.foreignKeys.forEach(fk => {
         const to = resolveReferencedNodeId(nodes, fk.referencedTable);
         if (!to) return;
-        edges.push({ id: crypto.randomUUID(), from, to, fromColumn: fk.columnName, toColumn: fk.referencedColumn, fromSide: 'right', toSide: 'left', label: fk.name || 'FK', kind: 'FK', relationship: '1:N', waypoints: [] });
+        edges.push({ id: createUuid(), from, to, fromColumn: fk.columnName, toColumn: fk.referencedColumn, fromSide: 'right', toSide: 'left', label: fk.name || 'FK', kind: 'FK', relationship: '1:N', waypoints: [] });
       });
     });
     return { name: 'Default diagram', zoom: 1, routingVersion: 2, layoutVersion: 2, nodes, edges };
   };
 
+  const createEmptyDiagram = (name = 'Default diagram') => ({
+    name: name || 'Default diagram',
+    zoom: 1,
+    routingVersion: 2,
+    layoutVersion: 2,
+    nodes: [],
+    edges: []
+  });
+
   const normalizeDiagram = value => {
-    const normalized = value && Array.isArray(value.nodes) && Array.isArray(value.edges) ? value : createDefaultDiagram(selectedSchema);
+    const normalized = value && Array.isArray(value.nodes) && Array.isArray(value.edges) ? value : createEmptyDiagram();
     if (normalized.routingVersion !== 2) {
       normalized.edges.forEach(edge => edge.waypoints = []);
       normalized.routingVersion = 2;
@@ -426,7 +480,9 @@
     links.style.height = `${Math.round(maxY * zoom)}px`;
     nodesHost.style.width = `${Math.round(maxX * zoom)}px`;
     nodesHost.style.height = `${Math.round(maxY * zoom)}px`;
-    nodesHost.innerHTML = visibleNodes.map(renderNode).join('');
+    nodesHost.innerHTML = visibleNodes.length
+      ? visibleNodes.map(renderNode).join('')
+      : '<div class="diagram-blank-state"><strong>Blank canvas</strong><span>Choose only the database objects you want to diagram.</span><button type="button" class="btn btn-primary btn-sm">Choose objects</button></div>';
     links.innerHTML = renderEdges();
     nodesHost.querySelectorAll('.diagram-table').forEach(element => {
       element.addEventListener('pointerdown', startDrag);
@@ -444,6 +500,10 @@
       renderDiagram();
     }));
     nodesHost.querySelectorAll('.diagram-connect-handle').forEach(button => button.addEventListener('pointerdown', startConnectorDrag));
+    nodesHost.querySelector('.diagram-blank-state button')?.addEventListener('click', event => {
+      event.stopPropagation();
+      openDiagramObjectSelector();
+    });
     bindEdgeInteractions(links);
     canvas.oncontextmenu = event => event.preventDefault();
     canvas.onpointerdown = startCanvasPan;
@@ -900,7 +960,7 @@
     if (diagram.edges.some(edge => edge.from === from.nodeId && edge.to === to.nodeId && edge.fromColumn === from.column && edge.toColumn === to.column)) return notify('Relationship already exists.');
     const relationship = '1:N';
     const edge = {
-      id: crypto.randomUUID(),
+      id: createUuid(),
       from: from.nodeId,
       to: to.nodeId,
       fromColumn: from.column,
@@ -1148,7 +1208,7 @@
     const source = selectedSource();
     if (!source || !confirm(`Delete ${source.name}?`)) return;
     try {
-      await fetch(`/api/sql-doc/sources/${source.id}`, { method:'DELETE' });
+      await fetch(appUrl(`/api/sql-doc/sources/${source.id}`), { method:'DELETE' });
       selectedSourceId = null;
       notify('Database source deleted.');
       await loadSources();
@@ -1157,6 +1217,7 @@
 
   const downloadDocx = async () => {
     if (!selectedSourceId) return;
+    const downloadSourceName = selectedSource()?.name || selectedSchema?.sourceName || 'database-sql-doc';
     const selector = byId('sql-doc-object-selector');
     const specific = selector?.querySelector('input[name="sql-doc-scope"]:checked')?.value === 'specific';
     const selectedObjects = specific ? [...selector.querySelectorAll('.object-tree-item-input:checked')].map(input => input.value) : [];
@@ -1175,13 +1236,13 @@
     const original = button?.innerHTML;
     if (button) { button.disabled = true; button.innerHTML = '<span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>Generating document'; }
     try {
-      const response = await fetch(`/api/sql-doc/sources/${selectedSourceId}/docx`, { method:'POST', headers:{ 'Content-Type':'application/json' }, body:JSON.stringify(options) });
+      const response = await fetch(appUrl(`/api/sql-doc/sources/${selectedSourceId}/docx`), { method:'POST', headers:{ 'Content-Type':'application/json' }, body:JSON.stringify(options) });
       if (!response.ok) throw new Error(await readError(response));
       const blob = await response.blob();
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = fileNameFromResponse(response) || 'database-sql-doc.docx';
+      link.download = normalizeDocxFileName(downloadSourceName);
       document.body.appendChild(link);
       link.click();
       link.remove();
@@ -1226,9 +1287,9 @@
   });
 
   const readError = async response => { try { const result = await response.json(); return result.error || 'Unable to generate documentation.'; } catch { return await response.text() || 'Unable to generate documentation.'; } };
-  const fileNameFromResponse = response => /filename="?([^"]+)"?/i.exec(response.headers.get('content-disposition') || '')?.[1];
   const connectionSummary = connectionString => /(?:Database|Initial Catalog|Data Source)=([^;]+)/i.exec(connectionString || '')?.[1] || 'Open details';
   const safeFileName = value => String(value).replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, ' ').trim() || 'database-diagram';
+  const normalizeDocxFileName = value => `${safeFileName(String(value).replace(/\.docx$/i, ''))}.docx`;
 
   function connectionBody() {
     return {
