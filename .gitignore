@@ -11,6 +11,9 @@
 *.sqlite3
 *.sqlite3-shm
 *.sqlite3-wal
+*.db.pre-upgrade-*.bak
+*.sqlite.pre-upgrade-*.bak
+*.sqlite3.pre-upgrade-*.bak
 
 # Local tooling and runtime output
 .vs/
