@@ -16,9 +16,9 @@ public sealed record LogLevelCount(string Level, int Count);
 public sealed record LogParseResult(IReadOnlyList<LogEntry> Entries, int TotalCount, int FilteredCount, IReadOnlyList<LogLevelCount> Statistics, int Page, int PageSize, int TotalPages);
 
 public sealed record CreateSystemRequest(string? Name);
-public sealed record CreateLogSourceRequest(string? ModuleName, string? Path, string Format = "auto", string? CustomPattern = null, string? TimestampFormat = null);
-public sealed record UpdateLogSourceRequest(string? ModuleName, string? Path, string Format = "auto", string? CustomPattern = null, string? TimestampFormat = null);
-public sealed record LogSourceDto(int Id, string ModuleName, string Path, string Format, string? CustomPattern, string? TimestampFormat);
+public sealed record CreateLogSourceRequest(string? ModuleName, string? Path, string Format = "auto", string? CustomPattern = null, string? TimestampFormat = null, bool IncludeSubdirectories = true);
+public sealed record UpdateLogSourceRequest(string? ModuleName, string? Path, string Format = "auto", string? CustomPattern = null, string? TimestampFormat = null, bool IncludeSubdirectories = true);
+public sealed record LogSourceDto(int Id, string ModuleName, string Path, string Format, string? CustomPattern, string? TimestampFormat, bool IncludeSubdirectories);
 public sealed record LogSystemDto(int Id, string Name, IReadOnlyList<LogSourceDto> Sources);
 public sealed record LogRefreshStartResult(string JobId, string Status);
 public sealed record LogRefreshStatus(string JobId, int SystemId, int? SourceId, string Status, int FilesDiscovered, int FilesScanned, int FilesIndexed, int FilesUnchanged, int FilesRemoved, int FilesFailed, long EntriesIndexed, string? CurrentFile, DateTimeOffset StartedAt, DateTimeOffset? CompletedAt, string? Error);

@@ -15,6 +15,7 @@ public sealed class LogSource
     public string Format { get; set; } = "auto";
     public string? CustomPattern { get; set; }
     public string? TimestampFormat { get; set; }
+    public bool IncludeSubdirectories { get; set; } = true;
     public int LogSystemId { get; set; }
     public LogSystem? LogSystem { get; set; }
 }

@@ -27,6 +27,7 @@ public sealed class DevToolsDbContext(DbContextOptions<DevToolsDbContext> option
             entity.Property(item => item.Format).HasMaxLength(20).HasDefaultValue("auto").IsRequired();
             entity.Property(item => item.CustomPattern).HasMaxLength(2000);
             entity.Property(item => item.TimestampFormat).HasMaxLength(100);
+            entity.Property(item => item.IncludeSubdirectories).HasDefaultValue(true).IsRequired();
         });
         modelBuilder.Entity<SqlDocSource>(entity =>
         {

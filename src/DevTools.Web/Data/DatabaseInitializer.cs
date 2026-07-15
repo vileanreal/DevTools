@@ -24,6 +24,7 @@ public static class DatabaseInitializer
         if (!columns.Contains("Format")) Execute(connection, "ALTER TABLE LogSources ADD COLUMN Format TEXT NOT NULL DEFAULT 'auto'");
         if (!columns.Contains("CustomPattern")) Execute(connection, "ALTER TABLE LogSources ADD COLUMN CustomPattern TEXT NULL");
         if (!columns.Contains("TimestampFormat")) Execute(connection, "ALTER TABLE LogSources ADD COLUMN TimestampFormat TEXT NULL");
+        if (!columns.Contains("IncludeSubdirectories")) Execute(connection, "ALTER TABLE LogSources ADD COLUMN IncludeSubdirectories INTEGER NOT NULL DEFAULT 1");
         Execute(connection, """
             CREATE TABLE IF NOT EXISTS SqlDocSources (
                 Id INTEGER NOT NULL CONSTRAINT PK_SqlDocSources PRIMARY KEY AUTOINCREMENT,

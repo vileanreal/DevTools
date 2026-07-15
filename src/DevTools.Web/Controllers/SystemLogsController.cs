@@ -32,7 +32,7 @@ public sealed class SystemLogsController(ISystemLogService service, ILogIndexSer
             return BadRequest(ApiResult<LogSourceDto>.Fail("A valid log file path is required."));
         var formatError = ValidateFormat(request.Format, request.CustomPattern, request.TimestampFormat);
         if (formatError is not null) return BadRequest(ApiResult<LogSourceDto>.Fail(formatError));
-        try { return Ok(ApiResult<LogSourceDto>.Ok(await service.AddSourceAsync(systemId, request.ModuleName, request.Path, request.Format.ToLowerInvariant(), request.CustomPattern, request.TimestampFormat, cancellationToken))); }
+        try { return Ok(ApiResult<LogSourceDto>.Ok(await service.AddSourceAsync(systemId, request.ModuleName, request.Path, request.Format.ToLowerInvariant(), request.CustomPattern, request.TimestampFormat, request.IncludeSubdirectories, cancellationToken))); }
         catch (KeyNotFoundException ex) { return NotFound(ApiResult<LogSourceDto>.Fail(ex.Message)); }
         catch (Exception ex) when (ex is ArgumentException or NotSupportedException) { return BadRequest(ApiResult<LogSourceDto>.Fail("The log path is not valid.")); }
     }
@@ -46,7 +46,7 @@ public sealed class SystemLogsController(ISystemLogService service, ILogIndexSer
         {
             var formatError = ValidateFormat(request.Format, request.CustomPattern, request.TimestampFormat);
             if (formatError is not null) return BadRequest(ApiResult<LogSourceDto>.Fail(formatError));
-            var source = await service.UpdateSourceAsync(id, request.ModuleName!, request.Path!, request.Format.ToLowerInvariant(), request.CustomPattern, request.TimestampFormat, cancellationToken);
+            var source = await service.UpdateSourceAsync(id, request.ModuleName!, request.Path!, request.Format.ToLowerInvariant(), request.CustomPattern, request.TimestampFormat, request.IncludeSubdirectories, cancellationToken);
             return source is null ? NotFound(ApiResult<LogSourceDto>.Fail("Module not found.")) : Ok(ApiResult<LogSourceDto>.Ok(source));
         }
         catch (Exception ex) when (ex is ArgumentException or NotSupportedException) { return BadRequest(ApiResult<LogSourceDto>.Fail("The log path is not valid.")); }

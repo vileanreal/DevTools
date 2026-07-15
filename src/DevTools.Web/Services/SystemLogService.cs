@@ -9,8 +9,8 @@ public interface ISystemLogService
 {
     Task<IReadOnlyList<LogSystemDto>> GetSystemsAsync(CancellationToken cancellationToken);
     Task<LogSystemDto> CreateSystemAsync(string name, CancellationToken cancellationToken);
-    Task<LogSourceDto> AddSourceAsync(int systemId, string moduleName, string path, string format, string? customPattern, string? timestampFormat, CancellationToken cancellationToken);
-    Task<LogSourceDto?> UpdateSourceAsync(int id, string moduleName, string path, string format, string? customPattern, string? timestampFormat, CancellationToken cancellationToken);
+    Task<LogSourceDto> AddSourceAsync(int systemId, string moduleName, string path, string format, string? customPattern, string? timestampFormat, bool includeSubdirectories, CancellationToken cancellationToken);
+    Task<LogSourceDto?> UpdateSourceAsync(int id, string moduleName, string path, string format, string? customPattern, string? timestampFormat, bool includeSubdirectories, CancellationToken cancellationToken);
     Task<bool> DeleteSystemAsync(int id, CancellationToken cancellationToken);
     Task<bool> DeleteSourceAsync(int id, CancellationToken cancellationToken);
 }
@@ -21,7 +21,7 @@ public sealed class SystemLogService(DevToolsDbContext database, LogIndexDbConte
     public async Task<IReadOnlyList<LogSystemDto>> GetSystemsAsync(CancellationToken cancellationToken) =>
         await database.LogSystems.AsNoTracking().OrderBy(item => item.Name)
             .Select(item => new LogSystemDto(item.Id, item.Name, item.Sources.OrderBy(source => source.ModuleName)
-                .Select(source => new LogSourceDto(source.Id, source.ModuleName, source.Path, source.Format, source.CustomPattern, source.TimestampFormat)).ToList()))
+                .Select(source => new LogSourceDto(source.Id, source.ModuleName, source.Path, source.Format, source.CustomPattern, source.TimestampFormat, source.IncludeSubdirectories)).ToList()))
             .ToListAsync(cancellationToken);
 
     public async Task<LogSystemDto> CreateSystemAsync(string name, CancellationToken cancellationToken)
@@ -32,18 +32,18 @@ public sealed class SystemLogService(DevToolsDbContext database, LogIndexDbConte
         return new LogSystemDto(entity.Id, entity.Name, []);
     }
 
-    public async Task<LogSourceDto> AddSourceAsync(int systemId, string moduleName, string path, string format, string? customPattern, string? timestampFormat, CancellationToken cancellationToken)
+    public async Task<LogSourceDto> AddSourceAsync(int systemId, string moduleName, string path, string format, string? customPattern, string? timestampFormat, bool includeSubdirectories, CancellationToken cancellationToken)
     {
         if (!await database.LogSystems.AnyAsync(item => item.Id == systemId, cancellationToken))
             throw new KeyNotFoundException("System not found.");
         var fullPath = Path.GetFullPath(Environment.ExpandEnvironmentVariables(path.Trim()));
-        var entity = new LogSource { LogSystemId = systemId, ModuleName = moduleName.Trim(), Path = fullPath, Format = format, CustomPattern = customPattern, TimestampFormat = NormalizeTimestampFormat(timestampFormat) };
+        var entity = new LogSource { LogSystemId = systemId, ModuleName = moduleName.Trim(), Path = fullPath, Format = format, CustomPattern = customPattern, TimestampFormat = NormalizeTimestampFormat(timestampFormat), IncludeSubdirectories = includeSubdirectories };
         database.LogSources.Add(entity);
         await database.SaveChangesAsync(cancellationToken);
-        return new LogSourceDto(entity.Id, entity.ModuleName, entity.Path, entity.Format, entity.CustomPattern, entity.TimestampFormat);
+        return new LogSourceDto(entity.Id, entity.ModuleName, entity.Path, entity.Format, entity.CustomPattern, entity.TimestampFormat, entity.IncludeSubdirectories);
     }
 
-    public async Task<LogSourceDto?> UpdateSourceAsync(int id, string moduleName, string path, string format, string? customPattern, string? timestampFormat, CancellationToken cancellationToken)
+    public async Task<LogSourceDto?> UpdateSourceAsync(int id, string moduleName, string path, string format, string? customPattern, string? timestampFormat, bool includeSubdirectories, CancellationToken cancellationToken)
     {
         var entity = await database.LogSources.FindAsync([id], cancellationToken);
         if (entity is null) return null;
@@ -53,8 +53,9 @@ public sealed class SystemLogService(DevToolsDbContext database, LogIndexDbConte
         entity.Format = format;
         entity.CustomPattern = customPattern;
         entity.TimestampFormat = NormalizeTimestampFormat(timestampFormat);
+        entity.IncludeSubdirectories = includeSubdirectories;
         await database.SaveChangesAsync(cancellationToken);
-        return new LogSourceDto(entity.Id, entity.ModuleName, entity.Path, entity.Format, entity.CustomPattern, entity.TimestampFormat);
+        return new LogSourceDto(entity.Id, entity.ModuleName, entity.Path, entity.Format, entity.CustomPattern, entity.TimestampFormat, entity.IncludeSubdirectories);
     }
 
     public async Task<bool> DeleteSystemAsync(int id, CancellationToken cancellationToken)

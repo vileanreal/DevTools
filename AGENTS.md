@@ -38,7 +38,7 @@ Dependencies point inward: Web -> Application -> Shared. Web may also reference 
 - Validate all input at the boundary and return useful, safe error messages. Never expose stack traces to the browser.
 - Treat tool input as sensitive. Do not log or persist source text, logs, hashes, tokens, or formatted payloads.
 - System Logs stores configuration plus a rebuildable SQLite search index of parsed log entries. The index exists only for local querying, pagination, statistics, and full-text search; never write indexed content to application logs or external services.
-- System Logs discovery has no file-count cap. Refresh incrementally skips unchanged files, appends newly written UTF-8 lines where safe, and rebuilds only changed/truncated files.
+- System Logs discovery has no file-count cap and each module controls whether folder discovery includes subfolders. Refresh incrementally skips unchanged files, appends newly written UTF-8 lines where safe, and rebuilds only changed/truncated files.
 - System Logs indexing runs as a shared server-side background job. Leaving the page must not cancel it; concurrent users attach to the same per-system job and can view its progress.
 - Clearing a System Logs index runs as a shared background job, explicitly deletes indexed entries, checkpoints WAL, vacuums the index database, and removes/compacts any legacy index tables left in `devtools.db` from older builds. Index and clear jobs are mutually exclusive per system across concurrent users.
 - Each System Logs module persists a reader mode (`auto`, `text`, `json`, or `custom`). Custom regex readers require lowercase named `timestamp`, `level`, and `message` groups and must use a match timeout.
