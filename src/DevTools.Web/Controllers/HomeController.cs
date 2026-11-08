@@ -1,17 +1,13 @@
 using System.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
 using DevTools.Web.Models;
+using Microsoft.Extensions.Options;
 
 namespace DevTools.Web.Controllers;
 
-public class HomeController : Controller
+public class HomeController(IOptions<ToolOptions> toolOptions) : Controller
 {
-    private readonly ILogger<HomeController> _logger;
-
-    public HomeController(ILogger<HomeController> logger)
-    {
-        _logger = logger;
-    }
+    private readonly ToolOptions _toolOptions = toolOptions.Value;
 
     [HttpGet("/")]
     public IActionResult Index()
@@ -40,6 +36,7 @@ public class HomeController : Controller
 
     private IActionResult Tool(string tool, string title)
     {
+        if (!_toolOptions.IsEnabled(tool)) return NotFound();
         ViewData["Title"] = title;
         return View("Index", tool);
     }

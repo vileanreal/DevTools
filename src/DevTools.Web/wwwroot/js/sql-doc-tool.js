@@ -4,17 +4,32 @@
   const diagramObjectsModal = bootstrap.Modal.getOrCreateInstance(byId('sql-diagram-objects-modal'));
   const providerLabels = { sqlserver:'SQL Server', sqlite:'SQLite', mysql:'MySQL', oracle:'Oracle', postgresql:'PostgreSQL' };
   let sources = [], selectedSourceId = null, selectedSchema = null, activeTab = 'details', loadingSourceId = null;
-  let diagram = null, savedDiagrams = [], selectedNodeId = null, selectedEdgeId = null, connectDraft = null, dragState = null, nodeResizeState = null, edgeDragState = null, panState = null, diagramResizeObserver = null, diagramResizeFrame = null;
-  const DIAGRAM_PADDING = 180;
+  let diagram = null, savedDiagrams = [], selectedNodeId = null, selectedEdgeId = null, selectedAnnotationId = null, connectDraft = null, dragState = null, nodeResizeState = null, annotationDragState = null, edgeDragState = null, panState = null, suppressCanvasClick = false, diagramResizeObserver = null, diagramResizeFrame = null;
+  const selectedNodeIds = new Set();
+  const DIAGRAM_PADDING = 40;
   const DIAGRAM_VIEWPORT_BUFFER = 64;
   const MIN_NODE_WIDTH = 240;
   const MAX_NODE_WIDTH = 760;
+  const DIAGRAM_COLORS = ['#f8fafc','#dbeafe','#bfdbfe','#c7d2fe','#ddd6fe','#f3e8ff','#fce7f3','#fee2e2','#ffedd5','#fef3c7','#fef9c3','#ecfccb','#dcfce7','#ccfbf1','#cffafe','#e0f2fe','#e5e7eb','#cbd5e1','#94a3b8','#475569'];
+  const DIAGRAM_DARK_COLORS = ['#0f172a','#1e293b','#334155','#111827','#1f2937','#374151','#172554','#1e3a8a','#312e81','#3b0764','#4a044e','#500724','#450a0a','#7f1d1d','#431407','#78350f','#422006','#365314','#052e16','#042f2e'];
+  const DIAGRAM_PRIMARY_COLORS = ['#000000','#ffffff','#ef4444','#f97316','#f59e0b','#eab308','#84cc16','#22c55e','#10b981','#14b8a6','#06b6d4','#0ea5e9','#3b82f6','#6366f1','#8b5cf6','#a855f7','#d946ef','#ec4899','#f43f5e','#64748b'];
+  const RECENT_COLORS_KEY = 'devtools.diagram.recentColors';
   let diagramTextContext = null;
 
   const selectedSource = () => sources.find(source => source.id === selectedSourceId);
   const qualified = (schema, name) => schema ? `${schema}.${name}` : name;
   const nodeById = id => diagram?.nodes.find(node => node.id === id);
   const edgeById = id => diagram?.edges.find(edge => edge.id === id);
+  const annotationById = id => diagram?.annotations?.find(annotation => annotation.id === id);
+  const recentColors = () => { try { return JSON.parse(localStorage.getItem(RECENT_COLORS_KEY) || '[]').filter(value => /^#[0-9a-f]{6}$/i.test(value)).slice(0, 8); } catch { return []; } };
+  const rememberColor = color => {
+    const normalized = String(color || '').toLowerCase();
+    if (!/^#[0-9a-f]{6}$/.test(normalized)) return;
+    try { localStorage.setItem(RECENT_COLORS_KEY, JSON.stringify([normalized, ...recentColors().filter(value => value.toLowerCase() !== normalized)].slice(0, 8))); } catch { }
+  };
+  const clearNodeSelection = () => { selectedNodeIds.clear(); selectedNodeId = null; };
+  const selectOnlyNode = id => { selectedNodeIds.clear(); if (id) selectedNodeIds.add(id); selectedNodeId = id || null; };
+  const syncNodeSelectionClasses = () => byId('sql-diagram-nodes')?.querySelectorAll('.diagram-table').forEach(element => element.classList.toggle('selected', selectedNodeIds.has(element.dataset.nodeId)));
   const zoomLevel = () => Math.min(2.5, Math.max(.35, Number(diagram?.zoom || 1)));
   const clampNodeWidth = value => Math.min(MAX_NODE_WIDTH, Math.max(MIN_NODE_WIDTH, Math.round(Number(value) || MIN_NODE_WIDTH)));
   const measureDiagramText = (value, font) => {
@@ -28,13 +43,100 @@
     const visibleColumns = (node.columns || []).filter(column => !column.hidden);
     const columnWidths = visibleColumns.map(column =>
       measureDiagramText(column.name, '12px system-ui, sans-serif') +
-      measureDiagramText(column.type || '', '10px system-ui, sans-serif') + 94);
+      measureDiagramText(displayColumnType(column), '10px system-ui, sans-serif') + 94);
     const contentWidth = columnWidths.length ? Math.max(...columnWidths) : MIN_NODE_WIDTH;
     return clampNodeWidth(Math.ceil(Math.max(titleWidth, contentWidth) / 10) * 10);
   };
   const fitNodeToContent = node => {
     node.widthMode = 'fit';
     node.width = fittedNodeWidth(node);
+  };
+  const schemaTableById = id => selectedSchema?.tables.find(table => qualified(table.schema, table.name).toLocaleLowerCase() === String(id).toLocaleLowerCase());
+  const displayColumnType = column => {
+    const type = String(column?.type || '');
+    const maxLength = column?.maxLength !== null && column?.maxLength !== undefined && Number.isFinite(Number(column.maxLength)) ? Number(column.maxLength) : null;
+    if (maxLength === null) {
+      const unboundedText = /^(?:n?text|clob|nclob|blob|longtext|mediumtext|tinytext)$/i.test(type.trim());
+      return diagram?.showTypeLength !== false && unboundedText ? `${type}(max)` : type;
+    }
+    const baseType = type.replace(/\s*\(\s*(?:max|-?\d+)\s*\)\s*$/i, '');
+    if (diagram?.showTypeLength === false) return baseType;
+    return /\([^)]*\)\s*$/.test(type) ? type : `${baseType}(${maxLength < 0 ? 'max' : maxLength})`;
+  };
+  const columnChangeLabel = column => {
+    if (column.change === 'new') return 'New in database';
+    if (column.change === 'deleted') return 'Deleted from database';
+    if (column.change === 'modified') return column.changeDetails || `${column.previousType || 'Unknown type'} → ${column.type || 'Unknown type'}`;
+    return '';
+  };
+  const reconcileDiagramSchema = () => {
+    if (!diagram || !selectedSchema) return;
+    diagram.nodes.forEach(node => {
+      const isDatabaseObject = node.databaseObject === true || (node.databaseObject !== false && node.schema !== 'custom');
+      if (!isDatabaseObject) return;
+      node.databaseObject = true;
+      node.tableChange = null;
+      const table = schemaTableById(node.id);
+      if (!table) {
+        node.tableChange = 'deleted';
+        node.columns.forEach(column => {
+          column.change = 'deleted';
+          column.changeDetails = 'Column retained because its table is no longer present in the database.';
+        });
+        return;
+      }
+
+      const actualColumns = new Map(table.columns.map(column => [column.name.toLocaleLowerCase(), column]));
+      const savedColumns = new Set();
+      node.columns.forEach(column => {
+        const key = column.name.toLocaleLowerCase();
+        savedColumns.add(key);
+        const actual = actualColumns.get(key);
+        const pendingNew = column.change === 'new' || column.hiddenReason === 'new';
+        delete column.change;
+        delete column.changeDetails;
+        delete column.previousType;
+        if (!actual) {
+          column.change = 'deleted';
+          column.changeDetails = 'This field no longer exists in the database. It remains in the saved diagram until you remove the table or clear the diagram.';
+          return;
+        }
+        const previousType = column.type || '';
+        const previousMaxLength = column.maxLength;
+        const typeChanged = previousType !== actual.dataType;
+        const lengthChanged = previousMaxLength !== undefined && previousMaxLength !== actual.maxLength;
+        const keyChanged = Boolean(column.pk) !== Boolean(actual.isPrimaryKey);
+        if (typeChanged || lengthChanged || keyChanged) {
+          column.change = 'modified';
+          column.previousType = previousType;
+          column.changeDetails = [typeChanged ? `Type changed from ${previousType || 'unknown'} to ${actual.dataType}.` : '', lengthChanged ? `Maximum length changed from ${previousMaxLength ?? 'none'} to ${actual.maxLength ?? 'none'}.` : '', keyChanged ? `Primary key changed from ${column.pk ? 'yes' : 'no'} to ${actual.isPrimaryKey ? 'yes' : 'no'}.` : ''].filter(Boolean).join(' ');
+        }
+        column.type = actual.dataType;
+        column.pk = actual.isPrimaryKey;
+        column.nullable = actual.isNullable;
+        column.defaultValue = actual.defaultValue;
+        column.maxLength = actual.maxLength;
+        if (pendingNew) {
+          column.change = 'new';
+          column.hiddenReason = column.hidden ? 'new' : null;
+          column.changeDetails = 'This field is new in the database. Update the table to accept it, or choose its visibility first.';
+        }
+      });
+      table.columns.filter(column => !savedColumns.has(column.name.toLocaleLowerCase())).forEach(column => node.columns.push({
+        name:column.name,
+        type:column.dataType,
+        pk:column.isPrimaryKey,
+        nullable:column.isNullable,
+        defaultValue:column.defaultValue,
+        maxLength:column.maxLength,
+        hidden:true,
+        hiddenReason:'new',
+        change:'new',
+        changeDetails:'This field is new in the database. Select its checkbox to show it on the diagram.'
+      }));
+      if (node.columns.some(column => column.change)) node.tableChange = 'changed';
+      if (node.widthMode === 'fit') node.width = fittedNodeWidth(node);
+    });
   };
   const arrangeDefaultNodes = nodes => {
     let y = DIAGRAM_PADDING;
@@ -76,7 +178,7 @@
     selectedSourceId = id;
     selectedSchema = null;
     diagram = null;
-    selectedNodeId = null;
+    clearNodeSelection();
     selectedEdgeId = null;
     connectDraft = null;
     loadingSourceId = id;
@@ -179,10 +281,17 @@
           <button id="sql-diagram-reset" class="btn btn-ghost btn-sm">Clear canvas</button>
         </div>
       </div>
-      <div class="sql-diagram-help">Drag tables to arrange. Drag a side handle to another table or column to connect it. Select a connector anywhere along its line, then drag the blue segment midpoint to reshape it.</div>
+      <div class="sql-diagram-help">Drag tables to arrange. Ctrl/Cmd/Shift-click tables to select several and drag them together. Drag blank canvas space with a normal click, three-finger drag, or right-click to move around freely. Drag a row-side handle onto the left or right side of another field.</div>
       <div class="sql-diagram-layout">
         <aside id="sql-diagram-inspector" class="sql-diagram-inspector">${renderInspector()}</aside>
         <div id="sql-diagram-canvas" class="sql-diagram-canvas">
+          <div class="diagram-canvas-toolbar" role="toolbar" aria-label="Canvas annotations">
+            <button id="diagram-add-text" class="btn btn-light btn-sm" type="button" title="Add a movable label">T Text</button>
+            <button id="diagram-add-box" class="btn btn-light btn-sm" type="button" title="Add a movable grouping box">▭ Box</button>
+            <div id="diagram-annotation-text-slot"></div>
+            <div id="diagram-annotation-color-slot"></div>
+            <button id="diagram-delete-annotation" class="btn btn-light btn-sm text-danger d-none" type="button" title="Delete selected annotation">Delete</button>
+          </div>
           <svg id="sql-diagram-links" class="sql-diagram-links"></svg>
           <div id="sql-diagram-nodes" class="sql-diagram-nodes"></div>
         </div>
@@ -210,9 +319,12 @@
     { type:'indexes', label:'Indexes', items:schema.indexes.map(item => ({ value:`index:${item.name}`, label:item.name, meta:qualified(item.schema, item.tableName) })) }
   ];
 
-  const diagramObjectGroups = schema => [
-    { type:'tables', label:'Tables', items:schema.tables.map(item => ({ value:qualified(item.schema, item.name), label:qualified(item.schema, item.name), meta:`${item.columns.length} columns` })) }
+  const diagramObjectGroups = schema => {
+    const added = new Set((diagram?.nodes || []).filter(node => !node.hidden).map(node => node.id));
+    return [
+    { type:'tables', label:'Tables', items:schema.tables.map(item => { const value = qualified(item.schema, item.name); return { value, label:value, meta:`${item.columns.length} columns`, added:added.has(value) }; }) }
   ];
+  };
 
   const renderObjectScopeSelector = (prefix, groups, selectedValues = null, scope = 'all') => {
     const selected = selectedValues instanceof Set ? selectedValues : new Set(groups.flatMap(group => group.items.map(item => item.value)));
@@ -221,6 +333,7 @@
         <label><input class="form-check-input" type="radio" name="${prefix}-scope" value="all" ${scope === 'all' ? 'checked' : ''}> <span><strong>Entire database</strong><small>Include every available database object.</small></span></label>
         <label><input class="form-check-input" type="radio" name="${prefix}-scope" value="specific" ${scope === 'specific' ? 'checked' : ''}> <span><strong>Select specific database objects</strong><small>Expand object types and choose individual objects.</small></span></label>
       </div>
+      ${prefix === 'sql-diagram' ? '<label class="object-not-added-filter"><input class="form-check-input object-not-added-only" type="checkbox"> <span><strong>Show only tables not added yet</strong><small>Hide tables that are already visible on this diagram.</small></span></label>' : ''}
       <div class="ssms-object-tree ${scope === 'all' ? 'is-disabled' : ''}">
         ${groups.map(group => {
           const checkedCount = group.items.filter(item => selected.has(item.value)).length;
@@ -230,7 +343,7 @@
               <button class="object-tree-expander" type="button" aria-expanded="false" aria-label="Expand ${escapeHtml(group.label)}">+</button>
               <label><input class="form-check-input object-tree-group-input" type="checkbox" ${groupChecked ? 'checked' : ''} ${group.items.length ? '' : 'disabled'}> <span class="object-tree-folder" aria-hidden="true">▱</span><strong>${escapeHtml(group.label)}</strong><small>${Number(group.count ?? group.items.length).toLocaleString()}</small></label>
             </div>
-            <div class="object-tree-children d-none">${group.items.length ? group.items.map(item => `<label class="object-tree-item"><input class="form-check-input object-tree-item-input" type="checkbox" value="${escapeHtml(item.value)}" ${selected.has(item.value) ? 'checked' : ''}><span>${escapeHtml(item.label)}</span>${item.meta ? `<small>${escapeHtml(item.meta)}</small>` : ''}</label>`).join('') : '<div class="object-tree-empty">No objects</div>'}</div>
+            <div class="object-tree-children d-none">${group.items.length ? group.items.map(item => `<label class="object-tree-item" data-added="${item.added ? 'true' : 'false'}"><input class="form-check-input object-tree-item-input" type="checkbox" value="${escapeHtml(item.value)}" ${selected.has(item.value) ? 'checked' : ''}><span>${escapeHtml(item.label)}</span>${item.meta ? `<small>${escapeHtml(item.meta)}</small>` : ''}</label>`).join('') : '<div class="object-tree-empty">No objects</div>'}</div>
           </div>`;
         }).join('')}
       </div>
@@ -267,6 +380,7 @@
     if (!root) return;
     const tree = root.querySelector('.ssms-object-tree');
     const itemInputs = () => [...root.querySelectorAll('.object-tree-item-input')];
+    const visibleItemInputs = () => itemInputs().filter(input => !input.closest('.object-tree-item')?.classList.contains('d-none'));
     const activateSpecific = () => {
       const radio = root.querySelector(`input[name="${prefix}-scope"][value="specific"]`);
       if (radio) radio.checked = true;
@@ -282,10 +396,12 @@
     };
     const updateSummary = () => {
       root.querySelectorAll('.object-tree-group').forEach(updateGroup);
-      const selected = itemInputs().filter(input => input.checked).length;
-      const total = itemInputs().length;
+      const visibleOnly = root.querySelector('.object-not-added-only')?.checked;
+      const inputs = visibleOnly ? visibleItemInputs() : itemInputs();
+      const selected = inputs.filter(input => input.checked).length;
+      const total = inputs.length;
       const target = root.querySelector('.object-selection-summary');
-      if (target) target.textContent = `${selected.toLocaleString()} of ${total.toLocaleString()} selected`;
+      if (target) target.textContent = `${selected.toLocaleString()} of ${total.toLocaleString()} ${visibleOnly ? 'not-added ' : ''}selected`;
     };
     const refreshScope = () => {
       const specific = root.querySelector(`input[name="${prefix}-scope"]:checked`)?.value === 'specific';
@@ -303,12 +419,23 @@
       children?.classList.toggle('d-none', !expanded);
     }));
     root.querySelectorAll('.object-tree-group-input').forEach(input => input.addEventListener('change', () => {
-      input.closest('.object-tree-group')?.querySelectorAll('.object-tree-item-input').forEach(child => child.checked = input.checked);
+      [...(input.closest('.object-tree-group')?.querySelectorAll('.object-tree-item-input') || [])].filter(child => !child.closest('.object-tree-item')?.classList.contains('d-none')).forEach(child => child.checked = input.checked);
       updateSummary();
     }));
     itemInputs().forEach(input => input.addEventListener('change', updateSummary));
-    root.querySelector('.object-select-all')?.addEventListener('click', () => { activateSpecific(); itemInputs().forEach(input => input.checked = true); updateSummary(); });
-    root.querySelector('.object-select-none')?.addEventListener('click', () => { activateSpecific(); itemInputs().forEach(input => input.checked = false); updateSummary(); });
+    root.querySelector('.object-select-all')?.addEventListener('click', () => { activateSpecific(); visibleItemInputs().forEach(input => input.checked = true); updateSummary(); });
+    root.querySelector('.object-select-none')?.addEventListener('click', () => { activateSpecific(); visibleItemInputs().forEach(input => input.checked = false); updateSummary(); });
+    root.querySelector('.object-not-added-only')?.addEventListener('change', event => {
+      root.querySelectorAll('.object-tree-item[data-added="true"]').forEach(item => item.classList.toggle('d-none', event.target.checked));
+      if (event.target.checked) root.querySelectorAll('.object-tree-group').forEach(group => {
+        const button = group.querySelector('.object-tree-expander');
+        const children = group.querySelector('.object-tree-children');
+        button?.setAttribute('aria-expanded', 'true');
+        if (button) button.textContent = '−';
+        children?.classList.remove('d-none');
+      });
+      updateSummary();
+    });
     refreshScope();
   };
 
@@ -354,11 +481,17 @@
     byId('sql-diagram-fullscreen')?.addEventListener('click', toggleDiagramFullscreen);
     byId('sql-diagram-choose-objects')?.addEventListener('click', openDiagramObjectSelector);
     byId('sql-diagram-add-table')?.addEventListener('click', addDiagramTable);
+    byId('diagram-add-text')?.addEventListener('click', () => addAnnotation('text'));
+    byId('diagram-add-box')?.addEventListener('click', () => addAnnotation('box'));
+    byId('diagram-delete-annotation')?.addEventListener('click', deleteSelectedAnnotation);
+    document.querySelector('.diagram-canvas-toolbar')?.addEventListener('pointerdown', event => event.stopPropagation());
+    document.querySelector('.diagram-canvas-toolbar')?.addEventListener('click', event => event.stopPropagation());
     byId('sql-diagram-reset')?.addEventListener('click', () => {
       if (!confirm('Clear every table and connector from this canvas? Unsaved layout changes will be lost.')) return;
       diagram = createEmptyDiagram(diagram?.name);
-      selectedNodeId = null;
+      clearNodeSelection();
       selectedEdgeId = null;
+      selectedAnnotationId = null;
       connectDraft = null;
       refreshDiagramUi();
     });
@@ -368,12 +501,18 @@
       try {
         const saved = await jsonRequest(`/api/sql-doc/sources/${selectedSourceId}/diagrams/${event.target.value}`);
         diagram = normalizeDiagram(JSON.parse(saved.diagramJson));
+        reconcileDiagramSchema();
         diagram.zoom = zoomLevel();
         diagram.name = saved.name;
-        selectedNodeId = null;
+        clearNodeSelection();
         selectedEdgeId = null;
+        selectedAnnotationId = null;
         connectDraft = null;
         refreshDiagramUi();
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          const canvas = byId('sql-diagram-canvas');
+          if (canvas) { canvas.scrollLeft = 0; canvas.scrollTop = 0; }
+        }));
       } catch (error) { notify(error.message, true); }
     });
     bindInspector();
@@ -412,6 +551,9 @@
     const databaseIds = new Set(selectedSchema.tables.map(table => qualified(table.schema, table.name)));
     const selectedIds = scope === 'all' ? databaseIds : selected;
     const defaults = createDefaultDiagram(selectedSchema, selectedIds);
+    const existingIds = new Set(diagram.nodes.map(node => node.id));
+    const newNodes = defaults.nodes.filter(node => selectedIds.has(node.id) && !existingIds.has(node.id));
+    positionNewDiagramNodes(newNodes);
 
     // Keep custom tables and existing positions, but do not retain thousands of
     // unselected database nodes in memory.
@@ -427,11 +569,36 @@
       const exists = diagram.edges.some(current => current.from === edge.from && current.to === edge.to && current.fromColumn === edge.fromColumn && current.toColumn === edge.toColumn);
       if (!exists) diagram.edges.push(edge);
     });
-    selectedNodeId = null;
+    clearNodeSelection();
     selectedEdgeId = null;
     connectDraft = null;
     diagramObjectsModal.hide();
     refreshDiagramUi();
+  };
+
+  const positionNewDiagramNodes = nodes => {
+    const canvas = byId('sql-diagram-canvas');
+    if (!canvas || !nodes.length) return;
+    const zoom = zoomLevel();
+    const padding = 28;
+    const viewTop = canvas.scrollTop / zoom;
+    const viewRight = (canvas.scrollLeft + canvas.clientWidth) / zoom;
+    const viewBottom = (canvas.scrollTop + canvas.clientHeight) / zoom;
+    let columnRight = viewRight - padding;
+    let y = viewTop + padding;
+    let columnWidth = 0;
+    nodes.forEach(node => {
+      const height = nodeHeight(node);
+      if (y > viewTop + padding && y + height > viewBottom - padding) {
+        columnRight -= columnWidth + 40;
+        columnWidth = 0;
+        y = viewTop + padding;
+      }
+      node.x = Math.max(DIAGRAM_PADDING, Math.round(columnRight - node.width));
+      node.y = Math.max(DIAGRAM_PADDING, Math.round(y));
+      columnWidth = Math.max(columnWidth, node.width);
+      y += height + 32;
+    });
   };
 
   const createDefaultDiagram = (schema, includedIds = null) => {
@@ -442,6 +609,7 @@
       const id = qualified(table.schema, table.name);
       return {
         id,
+        databaseObject: true,
         schema: table.schema,
         name: table.name,
         x: DIAGRAM_PADDING,
@@ -452,7 +620,7 @@
         borderColor: '#d0d5dd',
         hidden: false,
         collapsed: false,
-        columns: table.columns.map(column => ({ name: column.name, type: column.dataType, pk: column.isPrimaryKey, hidden: false }))
+        columns: table.columns.map(column => ({ name: column.name, type: column.dataType, maxLength:column.maxLength, pk: column.isPrimaryKey, nullable:column.isNullable, defaultValue:column.defaultValue, hidden: false }))
       };
     });
     nodes.forEach(fitNodeToContent);
@@ -466,7 +634,7 @@
         edges.push({ id: createUuid(), from, to, fromColumn: fk.columnName, toColumn: fk.referencedColumn, fromSide: 'right', toSide: 'left', label: fk.name || 'FK', kind: 'FK', relationship: '1:N', waypoints: [] });
       });
     });
-    return { name: 'Default diagram', zoom: 1, routingVersion: 2, layoutVersion: 2, widthVersion: 1, nodes, edges };
+    return { name: 'Default diagram', zoom: 1, routingVersion: 2, layoutVersion: 2, widthVersion: 1, panPaddingX:0, panPaddingY:0, nodes, edges };
   };
 
   const createEmptyDiagram = (name = 'Default diagram') => ({
@@ -475,17 +643,40 @@
     routingVersion: 2,
     layoutVersion: 2,
     widthVersion: 1,
+    panPaddingX: 0,
+    panPaddingY: 0,
+    showTypeLength: true,
     nodes: [],
-    edges: []
+    edges: [],
+    annotations: []
   });
 
   const normalizeDiagram = value => {
     const normalized = value && Array.isArray(value.nodes) && Array.isArray(value.edges) ? value : createEmptyDiagram();
+    normalized.annotations = Array.isArray(normalized.annotations) ? normalized.annotations.map(annotation => ({
+      id:annotation.id || createUuid(),
+      type:annotation.type === 'box' ? 'box' : 'text',
+      text:String(annotation.text || (annotation.type === 'box' ? 'Group' : 'Label')).slice(0, 240),
+      x:Math.max(0, Number(annotation.x) || DIAGRAM_PADDING),
+      y:Math.max(0, Number(annotation.y) || DIAGRAM_PADDING),
+      width:Math.max(80, Number(annotation.width) || (annotation.type === 'box' ? 420 : 180)),
+      height:Math.max(40, Number(annotation.height) || (annotation.type === 'box' ? 240 : 48)),
+      color:/^#[0-9a-f]{6}$/i.test(annotation.color || '') ? annotation.color : (annotation.type === 'box' ? '#dbeafe' : '#475569')
+    })) : [];
+    normalized.showTypeLength = normalized.showTypeLength !== false;
     normalized.nodes.forEach(node => {
       node.columns = Array.isArray(node.columns) ? node.columns : [];
+      node.columns.forEach(column => {
+        column.hidden = Boolean(column.hidden);
+        if (column.hidden && !column.hiddenReason) column.hiddenReason = column.change === 'new' ? 'new' : 'user';
+        if (!column.hidden && column.hiddenReason === 'user') column.hiddenReason = null;
+      });
+      if (typeof node.databaseObject !== 'boolean') node.databaseObject = node.schema !== 'custom';
       node.widthMode = node.widthMode === 'custom' ? 'custom' : 'fit';
       node.width = node.widthMode === 'fit' ? fittedNodeWidth(node) : clampNodeWidth(node.width);
     });
+    normalized.panPaddingX = Math.max(0, Number(normalized.panPaddingX) || 0);
+    normalized.panPaddingY = Math.max(0, Number(normalized.panPaddingY) || 0);
     normalized.widthVersion = 1;
     if (normalized.routingVersion !== 2) {
       normalized.edges.forEach(edge => edge.waypoints = []);
@@ -496,6 +687,8 @@
         ? edge.waypoints.filter(point => Number.isFinite(Number(point.x)) && Number.isFinite(Number(point.y))).map(point => ({ x:Number(point.x), y:Number(point.y) }))
         : [];
       if (!edge.relationship || (edge.kind === 'FK' && edge.relationship === 'N:1')) edge.relationship = '1:N';
+      edge.fromAnchor = '';
+      edge.toAnchor = '';
     });
     if (normalized.layoutVersion !== 2) {
       const shift = DIAGRAM_PADDING - 40;
@@ -513,9 +706,10 @@
     if (!canvas || !nodesHost || !links || !diagram) return;
     const zoom = zoomLevel();
     const visibleNodes = diagram.nodes.filter(node => !node.hidden);
+    const annotations = diagram.annotations || [];
     const controlPoints = diagram.edges.flatMap(edge => Array.isArray(edge.waypoints) ? edge.waypoints : []);
-    const maxX = Math.max(1200, Math.ceil((canvas.offsetWidth + DIAGRAM_VIEWPORT_BUFFER) / zoom), ...visibleNodes.map(node => node.x + node.width + DIAGRAM_PADDING), ...controlPoints.map(point => point.x + DIAGRAM_PADDING));
-    const maxY = Math.max(840, Math.ceil((canvas.offsetHeight + DIAGRAM_VIEWPORT_BUFFER) / zoom), ...visibleNodes.map(node => node.y + nodeHeight(node) + DIAGRAM_PADDING), ...controlPoints.map(point => point.y + DIAGRAM_PADDING));
+    const maxX = Math.max(1200, Math.ceil((canvas.offsetWidth + DIAGRAM_VIEWPORT_BUFFER) / zoom), ...visibleNodes.map(node => node.x + node.width + DIAGRAM_PADDING), ...annotations.map(item => item.x + item.width + DIAGRAM_PADDING), ...controlPoints.map(point => point.x + DIAGRAM_PADDING)) + (Number(diagram.panPaddingX) || 0);
+    const maxY = Math.max(840, Math.ceil((canvas.offsetHeight + DIAGRAM_VIEWPORT_BUFFER) / zoom), ...visibleNodes.map(node => node.y + nodeHeight(node) + DIAGRAM_PADDING), ...annotations.map(item => item.y + item.height + DIAGRAM_PADDING), ...controlPoints.map(point => point.y + DIAGRAM_PADDING)) + (Number(diagram.panPaddingY) || 0);
     canvas.style.minWidth = '';
     canvas.style.minHeight = '';
     links.setAttribute('width', maxX);
@@ -525,9 +719,9 @@
     links.style.height = `${Math.round(maxY * zoom)}px`;
     nodesHost.style.width = `${Math.round(maxX * zoom)}px`;
     nodesHost.style.height = `${Math.round(maxY * zoom)}px`;
-    nodesHost.innerHTML = visibleNodes.length
+    nodesHost.innerHTML = `${annotations.map(renderAnnotation).join('')}${visibleNodes.length
       ? visibleNodes.map(renderNode).join('')
-      : '<div class="diagram-blank-state"><strong>Blank canvas</strong><span>Choose only the database objects you want to diagram.</span><button type="button" class="btn btn-primary btn-sm">Choose objects</button></div>';
+      : '<div class="diagram-blank-state"><strong>Blank canvas</strong><span>Choose database objects, or use the toolbar to add labels and grouping boxes.</span><button type="button" class="btn btn-primary btn-sm">Choose objects</button></div>'}`;
     links.innerHTML = renderEdges();
     nodesHost.querySelectorAll('.diagram-table').forEach(element => {
       element.addEventListener('pointerdown', startDrag);
@@ -541,23 +735,31 @@
       const node = nodeById(button.dataset.nodeId);
       if (!node) return;
       node.collapsed = !node.collapsed;
-      selectedNodeId = node.id;
+      selectOnlyNode(node.id);
       refreshInspector();
       renderDiagram();
     }));
     nodesHost.querySelectorAll('.diagram-connect-handle').forEach(button => button.addEventListener('pointerdown', startConnectorDrag));
+    nodesHost.querySelectorAll('.diagram-annotation').forEach(element => {
+      element.addEventListener('pointerdown', startAnnotationDrag);
+      element.addEventListener('dblclick', renameAnnotation);
+    });
+    nodesHost.querySelectorAll('.diagram-annotation-resize').forEach(handle => handle.addEventListener('pointerdown', startAnnotationResize));
     nodesHost.querySelector('.diagram-blank-state button')?.addEventListener('click', event => {
       event.stopPropagation();
       openDiagramObjectSelector();
     });
     bindEdgeInteractions(links);
+    renderAnnotationToolbarColor();
     canvas.oncontextmenu = event => event.preventDefault();
     canvas.onpointerdown = startCanvasPan;
     canvas.onwheel = zoomCanvas;
     canvas.onclick = event => {
-      if (event.target.closest?.('.diagram-table')) return;
-      selectedNodeId = null;
+      if (suppressCanvasClick) { suppressCanvasClick = false; return; }
+      if (event.target.closest?.('.diagram-table,.diagram-annotation,.diagram-canvas-toolbar')) return;
+      clearNodeSelection();
       selectedEdgeId = null;
+      selectedAnnotationId = null;
       connectDraft = null;
       refreshInspector();
       renderDiagram();
@@ -569,10 +771,10 @@
     const sourceClass = connectDraft?.nodeId === node.id ? 'connect-source' : '';
     const zoom = zoomLevel();
     return `
-      <div class="diagram-table ${node.id === selectedNodeId ? 'selected' : ''} ${sourceClass}" data-node-id="${escapeHtml(node.id)}" style="left:${node.x * zoom}px;top:${node.y * zoom}px;width:${node.width}px;transform:scale(${zoom});--table-color:${escapeHtml(node.color)};--table-border:${escapeHtml(node.borderColor)}">
-        <div class="diagram-table-title">${renderConnector(node.id, '', 'left')}<span>▦</span><strong>${escapeHtml(node.id)}</strong><button class="diagram-collapse" type="button" data-node-id="${escapeHtml(node.id)}" title="${node.collapsed ? 'Show columns' : 'Hide columns'}">${node.collapsed ? '+' : '−'}</button>${renderConnector(node.id, '', 'right')}</div>
+      <div class="diagram-table ${selectedNodeIds.has(node.id) ? 'selected' : ''} ${sourceClass} ${node.tableChange ? `has-schema-change table-${node.tableChange}` : ''}" data-node-id="${escapeHtml(node.id)}" style="left:${node.x * zoom}px;top:${node.y * zoom}px;width:${node.width}px;transform:scale(${zoom});--table-color:${escapeHtml(node.color)};--table-border:${escapeHtml(node.borderColor)}">
+        <div class="diagram-table-title">${renderConnector(node.id, '', 'left')}<span>▦</span><strong>${escapeHtml(node.id)}</strong>${node.tableChange ? `<span class="diagram-change-dot" title="${node.tableChange === 'deleted' ? 'Table deleted from database' : 'Table fields changed'}">!</span>` : ''}<button class="diagram-collapse" type="button" data-node-id="${escapeHtml(node.id)}" title="${node.collapsed ? 'Show columns' : 'Hide columns'}">${node.collapsed ? '+' : '−'}</button>${renderConnector(node.id, '', 'right')}</div>
         <div class="diagram-columns ${node.collapsed ? 'd-none' : ''}">
-          ${visibleColumns.length ? visibleColumns.map(column => `<div class="diagram-column">${renderConnector(node.id, column.name, 'left')}<span>${column.pk ? '🔑' : '•'}</span><span>${escapeHtml(column.name)}</span><small>${escapeHtml(column.type || '')}</small>${renderConnector(node.id, column.name, 'right')}</div>`).join('') : '<div class="diagram-column muted">All columns hidden</div>'}
+          ${visibleColumns.length ? visibleColumns.map(column => `<div class="diagram-column ${column.change ? `field-${column.change}` : ''}" title="${escapeHtml(column.changeDetails || '')}">${renderConnector(node.id, column.name, 'left')}<span>${column.pk ? '🔑' : '•'}</span><span>${escapeHtml(column.name)}${column.change ? `<em>${column.change === 'new' ? 'NEW' : column.change === 'deleted' ? 'DELETED' : 'CHANGED'}</em>` : ''}</span><small>${escapeHtml(displayColumnType(column))}</small>${renderConnector(node.id, column.name, 'right')}</div>`).join('') : '<div class="diagram-column muted">All columns hidden</div>'}
         </div>
         <button class="diagram-resize-handle top-right" type="button" data-node-id="${escapeHtml(node.id)}" title="Drag to resize table" aria-label="Resize ${escapeHtml(node.id)} from the top-right corner"></button>
         <button class="diagram-resize-handle bottom-right" type="button" data-node-id="${escapeHtml(node.id)}" title="Drag to resize table" aria-label="Resize ${escapeHtml(node.id)} from the bottom-right corner"></button>
@@ -582,15 +784,117 @@
   const renderConnector = (nodeId, column, side) =>
     `<button class="diagram-connect-handle ${side}" type="button" title="${column ? `Connect ${column}` : `Connect ${nodeId}`}" data-node-id="${escapeHtml(nodeId)}" data-column="${escapeHtml(column)}" data-side="${side}"></button>`;
 
+  const renderAnnotation = annotation => {
+    const zoom = zoomLevel();
+    return `<div class="diagram-annotation diagram-annotation-${annotation.type} ${annotation.id === selectedAnnotationId ? 'selected' : ''}" data-annotation-id="${escapeHtml(annotation.id)}" style="left:${annotation.x * zoom}px;top:${annotation.y * zoom}px;width:${annotation.width}px;height:${annotation.height}px;transform:scale(${zoom});--annotation-color:${escapeHtml(annotation.color)}">
+      <span>${escapeHtml(annotation.text)}</span><button class="diagram-annotation-resize" type="button" title="Resize"></button>
+    </div>`;
+  };
+
+  const renderColorPicker = (context, color, label) => {
+    const recent = recentColors();
+    const swatches = values => values.map(value => `<button class="diagram-color-swatch ${value.toLowerCase() === String(color).toLowerCase() ? 'active' : ''}" type="button" data-color="${value}" title="${value}" style="--swatch:${value}"></button>`).join('');
+    return `<details class="diagram-color-picker" data-color-context="${context}">
+      <summary title="Choose ${escapeHtml(label)}"><i style="--swatch:${escapeHtml(color)}"></i><span>${escapeHtml(label)}</span></summary>
+      <div class="diagram-color-popover">
+        <strong>Light colors</strong><div class="diagram-color-grid">${swatches(DIAGRAM_COLORS)}</div>
+        <strong>Dark colors</strong><div class="diagram-color-grid">${swatches(DIAGRAM_DARK_COLORS)}</div>
+        <strong>Primary colors</strong><div class="diagram-color-grid">${swatches(DIAGRAM_PRIMARY_COLORS)}</div>
+        ${recent.length ? `<strong>Recently used</strong><div class="diagram-color-grid recent">${swatches(recent)}</div>` : ''}
+        <label class="diagram-custom-color"><span>Custom color</span><input class="form-control form-control-color" type="color" value="${escapeHtml(color)}"></label>
+      </div>
+    </details>`;
+  };
+
+  const bindColorPicker = (root, onColor) => {
+    if (!root) return;
+    const choose = color => {
+      rememberColor(color);
+      onColor(color);
+      root.removeAttribute('open');
+    };
+    root.querySelectorAll('.diagram-color-swatch').forEach(button => button.addEventListener('click', event => { event.preventDefault(); event.stopPropagation(); choose(button.dataset.color); }));
+    root.querySelector('.diagram-custom-color')?.addEventListener('click', event => event.stopPropagation());
+    root.querySelector('input[type="color"]')?.addEventListener('input', event => choose(event.target.value));
+  };
+
+  const renderAnnotationToolbarColor = () => {
+    const slot = byId('diagram-annotation-color-slot');
+    const textSlot = byId('diagram-annotation-text-slot');
+    const remove = byId('diagram-delete-annotation');
+    const annotation = annotationById(selectedAnnotationId);
+    if (remove) remove.classList.toggle('d-none', !annotation);
+    if (textSlot) {
+      textSlot.innerHTML = annotation ? `<input id="diagram-annotation-text" class="form-control form-control-sm" maxlength="240" aria-label="Annotation text" value="${escapeHtml(annotation.text)}">` : '';
+      byId('diagram-annotation-text')?.addEventListener('input', event => {
+        const selected = annotationById(selectedAnnotationId);
+        if (!selected) return;
+        selected.text = event.target.value;
+        const label = byId('sql-diagram-nodes')?.querySelector(`.diagram-annotation[data-annotation-id="${CSS.escape(selected.id)}"]>span`);
+        if (label) label.textContent = selected.text;
+      });
+    }
+    if (!slot) return;
+    slot.innerHTML = annotation ? renderColorPicker('annotation', annotation.color, 'Color') : '';
+    bindColorPicker(slot.querySelector('.diagram-color-picker'), color => {
+      const selected = annotationById(selectedAnnotationId);
+      if (!selected) return;
+      selected.color = color;
+      renderDiagram();
+    });
+  };
+
+  const viewportCenterWorld = () => {
+    const canvas = byId('sql-diagram-canvas'), zoom = zoomLevel();
+    return { x:(canvas.scrollLeft + canvas.clientWidth / 2) / zoom, y:(canvas.scrollTop + canvas.clientHeight / 2) / zoom };
+  };
+
+  const addAnnotation = type => {
+    const center = viewportCenterWorld();
+    const annotation = {
+      id:createUuid(), type, text:type === 'box' ? 'Group' : 'Text label',
+      width:type === 'box' ? 440 : 200, height:type === 'box' ? 260 : 52,
+      x:Math.max(0, Math.round(center.x - (type === 'box' ? 220 : 100))),
+      y:Math.max(0, Math.round(center.y - (type === 'box' ? 130 : 26))),
+      color:type === 'box' ? '#dbeafe' : '#475569'
+    };
+    diagram.annotations ||= [];
+    diagram.annotations.push(annotation);
+    selectedAnnotationId = annotation.id;
+    clearNodeSelection();
+    selectedEdgeId = null;
+    renderDiagram();
+    byId('diagram-annotation-text')?.select();
+  };
+
+  const deleteSelectedAnnotation = () => {
+    if (!selectedAnnotationId) return;
+    diagram.annotations = (diagram.annotations || []).filter(item => item.id !== selectedAnnotationId);
+    selectedAnnotationId = null;
+    renderDiagram();
+  };
+
+  const renameAnnotation = event => {
+    event.preventDefault();
+    event.stopPropagation();
+    const annotation = annotationById(event.currentTarget.dataset.annotationId);
+    if (!annotation) return;
+    selectedAnnotationId = annotation.id;
+    renderDiagram();
+    byId('diagram-annotation-text')?.focus();
+    byId('diagram-annotation-text')?.select();
+  };
+
   const renderEdges = () => {
     const visible = new Set(diagram.nodes.filter(node => !node.hidden).map(node => node.id));
     return `
       ${diagram.edges.filter(edge => visible.has(edge.from) && visible.has(edge.to)).map(edge => {
-        const points = edgePoints(edge);
+        const points = renderedEdgePoints(edge);
         if (points.length < 2) return '';
         const path = points.map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x} ${point.y}`).join(' ');
         const segmentHandles = renderSegmentHandles(edge, points);
-        return `<path d="${path}" class="diagram-edge-hit" data-edge-id="${edge.id}"></path><path d="${path}" class="diagram-edge ${edge.id === selectedEdgeId ? 'selected' : ''}" data-edge-id="${edge.id}"></path>${renderRelationshipEndpoints(edge, points)}${edge.id === selectedEdgeId ? segmentHandles : ''}`;
+        const endpointHandles = renderEndpointHandles(edge, points);
+        return `<path d="${path}" class="diagram-edge-hit" data-edge-id="${edge.id}"></path><path d="${path}" class="diagram-edge ${edge.id === selectedEdgeId ? 'selected' : ''}" data-edge-id="${edge.id}"></path>${renderRelationshipEndpoints(edge, points)}${edge.id === selectedEdgeId ? `${segmentHandles}${endpointHandles}` : ''}`;
       }).join('')}${renderConnectionPreview()}`;
   };
 
@@ -625,8 +929,21 @@
     return `<circle class="diagram-edge-segment-handle ${orientation}" cx="${x}" cy="${y}" r="5" data-edge-id="${edge.id}" data-segment-index="${index}"><title>Drag to move this ${orientation} segment</title></circle>`;
   }).join('');
 
+  const renderEndpointHandles = (edge, points) => {
+    if (points.length < 2) return '';
+    const start = points[0], end = points[points.length - 1];
+    const handlePoint = (point, side) => ({
+      x:point.x + (side === 'left' ? -18 : 18),
+      y:point.y
+    });
+    const fromHandle = handlePoint(start, edge.fromSide || 'right');
+    const toHandle = handlePoint(end, edge.toSide || 'left');
+    return `<line class="diagram-edge-endpoint-guide" x1="${start.x}" y1="${start.y}" x2="${fromHandle.x}" y2="${fromHandle.y}"></line><circle class="diagram-edge-endpoint-handle" cx="${fromHandle.x}" cy="${fromHandle.y}" r="7" data-edge-id="${edge.id}" data-endpoint="from"><title>Drag to reconnect the start</title></circle><line class="diagram-edge-endpoint-guide" x1="${end.x}" y1="${end.y}" x2="${toHandle.x}" y2="${toHandle.y}"></line><circle class="diagram-edge-endpoint-handle" cx="${toHandle.x}" cy="${toHandle.y}" r="7" data-edge-id="${edge.id}" data-endpoint="to"><title>Drag to reconnect the end</title></circle>`;
+  };
+
   const bindEdgeInteractions = links => {
     links.querySelectorAll('.diagram-edge-segment-handle').forEach(handle => handle.addEventListener('pointerdown', startEdgeSegmentDrag));
+    links.querySelectorAll('.diagram-edge-endpoint-handle').forEach(handle => handle.addEventListener('pointerdown', startEdgeEndpointDrag));
     links.querySelectorAll('.diagram-edge,.diagram-edge-hit').forEach(path => {
       path.addEventListener('click', selectEdge);
       path.addEventListener('dblclick', addWaypointFromEdge);
@@ -652,6 +969,18 @@
     return waypoints.length
       ? routeThroughWaypoints(start, end, waypoints, edge.fromSide || 'right', edge.toSide || 'left')
       : automaticOrthogonalRoute(start, end, edge.fromSide || 'right', edge.toSide || 'left');
+  };
+
+  const renderedEdgePoints = edge => {
+    if (edgeDragState?.mode !== 'endpoint' || edgeDragState.edge.id !== edge.id || !edgeDragState.currentPoint) return edgePoints(edge);
+    const draggingFrom = edgeDragState.endpoint === 'from';
+    const fixed = connectionPoint(edge, draggingFrom ? 'to' : 'from');
+    if (!fixed) return [];
+    const moving = edgeDragState.currentPoint;
+    const movingSide = moving.x <= fixed.x ? 'right' : 'left';
+    return draggingFrom
+      ? automaticOrthogonalRoute(moving, fixed, movingSide, edge.toSide || 'left')
+      : automaticOrthogonalRoute(fixed, moving, edge.fromSide || 'right', movingSide);
   };
 
   const automaticOrthogonalRoute = (start, end, fromSide, toSide) => {
@@ -748,6 +1077,56 @@
 
   const nodeHeight = node => node.collapsed ? 32 : 34 + Math.max(1, node.columns.filter(column => !column.hidden).length) * 24;
 
+  const startAnnotationDrag = event => {
+    if (event.button !== 0 || event.target.closest('.diagram-annotation-resize')) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const annotation = annotationById(event.currentTarget.dataset.annotationId);
+    if (!annotation) return;
+    selectedAnnotationId = annotation.id;
+    clearNodeSelection();
+    selectedEdgeId = null;
+    annotationDragState = { mode:'move', annotation, pointerId:event.pointerId, startX:event.clientX, startY:event.clientY, x:annotation.x, y:annotation.y };
+    document.addEventListener('pointermove', dragAnnotation);
+    document.addEventListener('pointerup', endAnnotationDrag, { once:true });
+    renderDiagram();
+  };
+
+  const startAnnotationResize = event => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const annotation = annotationById(event.currentTarget.closest('.diagram-annotation')?.dataset.annotationId);
+    if (!annotation) return;
+    selectedAnnotationId = annotation.id;
+    clearNodeSelection();
+    selectedEdgeId = null;
+    annotationDragState = { mode:'resize', annotation, pointerId:event.pointerId, startX:event.clientX, startY:event.clientY, width:annotation.width, height:annotation.height };
+    document.addEventListener('pointermove', dragAnnotation);
+    document.addEventListener('pointerup', endAnnotationDrag, { once:true });
+  };
+
+  const dragAnnotation = event => {
+    if (!annotationDragState || event.pointerId !== annotationDragState.pointerId) return;
+    event.preventDefault();
+    const state = annotationDragState, zoom = zoomLevel();
+    const dx = (event.clientX - state.startX) / zoom, dy = (event.clientY - state.startY) / zoom;
+    if (state.mode === 'move') {
+      state.annotation.x = Math.max(0, Math.round(state.x + dx));
+      state.annotation.y = Math.max(0, Math.round(state.y + dy));
+    } else {
+      state.annotation.width = Math.max(80, Math.round(state.width + dx));
+      state.annotation.height = Math.max(40, Math.round(state.height + dy));
+    }
+    renderDiagram();
+  };
+
+  const endAnnotationDrag = () => {
+    document.removeEventListener('pointermove', dragAnnotation);
+    annotationDragState = null;
+    renderDiagram();
+  };
+
   const startDrag = event => {
     if (event.button !== 0) return;
     if (!event.target.closest('.diagram-table')) return;
@@ -755,32 +1134,107 @@
     event.stopPropagation();
     const element = event.currentTarget, node = nodeById(element.dataset.nodeId);
     if (!node) return;
-    dragState = { element, node, pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, originalX: node.x, originalY: node.y, moved: false };
+    const modifier = event.ctrlKey || event.metaKey || event.shiftKey;
+    const wasSelected = selectedNodeIds.has(node.id);
+    if (modifier) {
+      if (!wasSelected) selectedNodeIds.add(node.id);
+      selectedNodeId = node.id;
+    } else if (!wasSelected) {
+      selectOnlyNode(node.id);
+    } else {
+      selectedNodeId = node.id;
+    }
+    selectedEdgeId = null;
+    selectedAnnotationId = null;
+    syncNodeSelectionClasses();
+    const nodes = diagram.nodes.filter(item => selectedNodeIds.has(item.id));
+    dragState = {
+      node,
+      nodes,
+      originalPositions:new Map(nodes.map(item => [item.id, { x:item.x, y:item.y }])),
+      modifier,
+      wasSelected,
+      pointerId:event.pointerId,
+      startX:event.clientX,
+      startY:event.clientY,
+      moved:false
+    };
+    document.body.classList.add('diagram-item-dragging');
     document.addEventListener('pointermove', dragMove);
     document.addEventListener('pointerup', endDrag, { once: true });
+    document.addEventListener('pointercancel', endDrag, { once: true });
   };
 
   const dragMove = event => {
     if (!dragState || event.pointerId !== dragState.pointerId) return;
+    event.preventDefault();
     const deltaX = event.clientX - dragState.startX;
     const deltaY = event.clientY - dragState.startY;
     dragState.moved = dragState.moved || Math.abs(deltaX) > 4 || Math.abs(deltaY) > 4;
     const zoom = zoomLevel();
-    dragState.node.x = Math.max(DIAGRAM_PADDING, dragState.originalX + deltaX / zoom);
-    dragState.node.y = Math.max(DIAGRAM_PADDING, dragState.originalY + deltaY / zoom);
-    dragState.element.style.left = `${dragState.node.x * zoom}px`;
-    dragState.element.style.top = `${dragState.node.y * zoom}px`;
+    const nextX = Math.min(...[...dragState.originalPositions.values()].map(position => position.x + deltaX / zoom));
+    const nextY = Math.min(...[...dragState.originalPositions.values()].map(position => position.y + deltaY / zoom));
+    const shiftX = nextX < DIAGRAM_PADDING ? DIAGRAM_PADDING - nextX : 0;
+    const shiftY = nextY < DIAGRAM_PADDING ? DIAGRAM_PADDING - nextY : 0;
+    if (shiftX || shiftY) {
+      diagram.nodes.forEach(node => {
+        node.x += shiftX;
+        node.y += shiftY;
+      });
+      (diagram.annotations || []).forEach(annotation => { annotation.x += shiftX; annotation.y += shiftY; });
+      diagram.edges.forEach(edge => (edge.waypoints || []).forEach(point => {
+        point.x += shiftX;
+        point.y += shiftY;
+      }));
+      dragState.originalPositions.forEach(position => { position.x += shiftX; position.y += shiftY; });
+      const canvas = byId('sql-diagram-canvas');
+      if (canvas) {
+        canvas.scrollLeft += shiftX * zoom;
+        canvas.scrollTop += shiftY * zoom;
+      }
+      byId('sql-diagram-nodes')?.querySelectorAll('.diagram-table').forEach(element => {
+        const node = nodeById(element.dataset.nodeId);
+        if (!node) return;
+        element.style.left = `${node.x * zoom}px`;
+        element.style.top = `${node.y * zoom}px`;
+      });
+      byId('sql-diagram-nodes')?.querySelectorAll('.diagram-annotation').forEach(element => {
+        const annotation = annotationById(element.dataset.annotationId);
+        if (!annotation) return;
+        element.style.left = `${annotation.x * zoom}px`;
+        element.style.top = `${annotation.y * zoom}px`;
+      });
+    }
+    dragState.nodes.forEach(node => {
+      const original = dragState.originalPositions.get(node.id);
+      node.x = original.x + deltaX / zoom;
+      node.y = original.y + deltaY / zoom;
+      const nodeElement = [...(byId('sql-diagram-nodes')?.querySelectorAll('.diagram-table') || [])].find(item => item.dataset.nodeId === node.id);
+      if (nodeElement) {
+        nodeElement.style.left = `${node.x * zoom}px`;
+        nodeElement.style.top = `${node.y * zoom}px`;
+      }
+    });
     const links = byId('sql-diagram-links');
     if (links) links.innerHTML = renderEdges();
   };
 
   const endDrag = event => {
     document.removeEventListener('pointermove', dragMove);
-    const nodeId = dragState?.node.id;
-    const wasClick = dragState && !dragState.moved;
+    document.removeEventListener('pointerup', endDrag);
+    document.removeEventListener('pointercancel', endDrag);
+    document.body.classList.remove('diagram-item-dragging');
+    const state = dragState;
+    const nodeId = state?.node.id;
+    const wasClick = state && !state.moved;
     dragState = null;
-    if (wasClick && nodeId) selectNode(nodeId);
-    else renderDiagram();
+    if (wasClick && nodeId) {
+      if (state.modifier && state.wasSelected) selectedNodeIds.delete(nodeId);
+      else if (!state.modifier) selectOnlyNode(nodeId);
+      selectedNodeId = selectedNodeIds.has(nodeId) ? nodeId : [...selectedNodeIds].at(-1) || null;
+      refreshInspector();
+    }
+    renderDiagram();
   };
 
   const startNodeResize = event => {
@@ -791,8 +1245,9 @@
     const element = handle.closest('.diagram-table');
     const node = nodeById(handle.dataset.nodeId);
     if (!element || !node) return;
-    selectedNodeId = node.id;
+    selectOnlyNode(node.id);
     selectedEdgeId = null;
+    selectedAnnotationId = null;
     nodeResizeState = {
       element,
       node,
@@ -827,8 +1282,9 @@
   };
 
   const selectNode = id => {
-    selectedNodeId = id;
+    selectOnlyNode(id);
     selectedEdgeId = null;
+    selectedAnnotationId = null;
     refreshInspector();
     renderDiagram();
   };
@@ -839,8 +1295,11 @@
     event.stopPropagation();
     const button = event.currentTarget;
     connectDraft = { nodeId: button.dataset.nodeId, column: button.dataset.column || '', side: button.dataset.side || 'right', currentPoint: canvasPoint(event) };
-    selectedNodeId = connectDraft.nodeId;
+    byId('sql-diagram-canvas')?.classList.add('is-connecting');
+    button.closest('.diagram-table')?.classList.add('connect-source');
+    selectOnlyNode(connectDraft.nodeId);
     selectedEdgeId = null;
+    selectedAnnotationId = null;
     document.addEventListener('pointermove', dragConnector);
     document.addEventListener('pointerup', endConnectorDrag, { once: true });
     const links = byId('sql-diagram-links');
@@ -850,13 +1309,42 @@
   const dragConnector = event => {
     if (!connectDraft) return;
     connectDraft.currentPoint = canvasPoint(event);
+    markRelationshipTarget(event.clientX, event.clientY);
     const links = byId('sql-diagram-links');
     if (links) links.innerHTML = renderEdges();
   };
 
+  const relationshipTargetAtPoint = (clientX, clientY) => {
+    const element = document.elementFromPoint(clientX, clientY);
+    const direct = element?.closest?.('.diagram-connect-handle');
+    if (direct) return direct;
+    const row = element?.closest?.('.diagram-column,.diagram-table-title') || element?.closest?.('.diagram-table')?.querySelector('.diagram-table-title');
+    if (!row) return null;
+    const handles = [...row.querySelectorAll('.diagram-connect-handle')];
+    if (!handles.length) return null;
+    const rect = row.getBoundingClientRect();
+    return handles.find(handle => handle.classList.contains(clientX < rect.left + rect.width / 2 ? 'left' : 'right')) || handles[0];
+  };
+
+  const clearRelationshipTarget = () => {
+    document.querySelectorAll('.diagram-connection-target').forEach(element => element.classList.remove('diagram-connection-target'));
+    document.querySelectorAll('.diagram-table.connect-hover').forEach(element => element.classList.remove('connect-hover'));
+  };
+
+  const markRelationshipTarget = (clientX, clientY) => {
+    clearRelationshipTarget();
+    const target = relationshipTargetAtPoint(clientX, clientY);
+    target?.closest('.diagram-column,.diagram-table-title')?.classList.add('diagram-connection-target');
+    target?.closest('.diagram-table')?.classList.add('connect-hover');
+    return target;
+  };
+
   const endConnectorDrag = event => {
     document.removeEventListener('pointermove', dragConnector);
-    const target = document.elementFromPoint(event.clientX, event.clientY)?.closest?.('.diagram-connect-handle');
+    byId('sql-diagram-canvas')?.classList.remove('is-connecting');
+    byId('sql-diagram-nodes')?.querySelectorAll('.diagram-table.connect-source').forEach(element => element.classList.remove('connect-source'));
+    clearRelationshipTarget();
+    const target = relationshipTargetAtPoint(event.clientX, event.clientY);
     if (connectDraft && target) {
       const endpoint = { nodeId: target.dataset.nodeId, column: target.dataset.column || '', side: target.dataset.side || 'left' };
       if (connectDraft.nodeId !== endpoint.nodeId || connectDraft.column !== endpoint.column || connectDraft.side !== endpoint.side) {
@@ -871,7 +1359,8 @@
   const selectEdge = event => {
     event.stopPropagation();
     selectedEdgeId = event.currentTarget.dataset.edgeId;
-    selectedNodeId = null;
+    clearNodeSelection();
+    selectedAnnotationId = null;
     connectDraft = null;
     refreshInspector();
     renderDiagram();
@@ -883,7 +1372,59 @@
     if (!edge) return;
     addManualWaypoint(edge, canvasPoint(event));
     selectedEdgeId = edge.id;
-    selectedNodeId = null;
+    clearNodeSelection();
+    refreshInspector();
+    renderDiagram();
+  };
+
+  const startEdgeEndpointDrag = event => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const edge = edgeById(event.currentTarget.dataset.edgeId);
+    if (!edge) return;
+    selectedEdgeId = edge.id;
+    clearNodeSelection();
+    selectedAnnotationId = null;
+    byId('sql-diagram-canvas')?.classList.add('is-connecting');
+    const prefix = event.currentTarget.dataset.endpoint === 'from' ? 'from' : 'to';
+    byId('sql-diagram-nodes')?.querySelector(`.diagram-table[data-node-id="${CSS.escape(edge[prefix])}"]`)?.classList.add('connect-source');
+    edgeDragState = {
+      mode:'endpoint',
+      edge,
+      endpoint:event.currentTarget.dataset.endpoint,
+      pointerId:event.pointerId,
+      currentPoint:canvasPoint(event)
+    };
+    document.addEventListener('pointermove', dragEdgeEndpoint);
+    document.addEventListener('pointerup', endEdgeEndpointDrag, { once:true });
+  };
+
+  const dragEdgeEndpoint = event => {
+    if (!edgeDragState || edgeDragState.mode !== 'endpoint' || event.pointerId !== edgeDragState.pointerId) return;
+    edgeDragState.currentPoint = canvasPoint(event);
+    markRelationshipTarget(event.clientX, event.clientY);
+    const links = byId('sql-diagram-links');
+    if (links) links.innerHTML = renderEdges();
+  };
+
+  const endEdgeEndpointDrag = event => {
+    document.removeEventListener('pointermove', dragEdgeEndpoint);
+    const state = edgeDragState;
+    const target = relationshipTargetAtPoint(event.clientX, event.clientY);
+    if (state?.mode === 'endpoint' && target) {
+      const prefix = state.endpoint === 'from' ? 'from' : 'to';
+      state.edge[prefix] = target.dataset.nodeId;
+      state.edge[`${prefix}Column`] = target.dataset.column || '';
+      state.edge[`${prefix}Side`] = target.dataset.side || 'left';
+      state.edge[`${prefix}Anchor`] = '';
+      state.edge.waypoints = [];
+      notify(`Relationship ${prefix === 'from' ? 'start' : 'end'} reconnected.`);
+    }
+    edgeDragState = null;
+    byId('sql-diagram-canvas')?.classList.remove('is-connecting');
+    byId('sql-diagram-nodes')?.querySelectorAll('.diagram-table.connect-source').forEach(element => element.classList.remove('connect-source'));
+    clearRelationshipTarget();
     refreshInspector();
     renderDiagram();
   };
@@ -897,7 +1438,7 @@
     const segmentIndex = Number(event.currentTarget.dataset.segmentIndex);
     if (!edge || route.length < 2 || !route[segmentIndex + 1]) return;
     selectedEdgeId = edge.id;
-    selectedNodeId = null;
+    clearNodeSelection();
     edgeDragState = {
       mode:'segment', edge, segmentIndex, pointerId:event.pointerId,
       orientation:route[segmentIndex].x === route[segmentIndex + 1].x ? 'vertical' : 'horizontal',
@@ -943,9 +1484,9 @@
   };
 
   const startCanvasPan = event => {
-    if (event.button !== 2) return;
+    if (![0, 2].includes(event.button) || event.target.closest?.('.diagram-table,.diagram-annotation,.diagram-canvas-toolbar,.diagram-edge,.diagram-edge-hit,.diagram-edge-segment-handle')) return;
     event.preventDefault();
-    panState = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, scrollLeft: event.currentTarget.scrollLeft, scrollTop: event.currentTarget.scrollTop, canvas: event.currentTarget };
+    panState = { pointerId: event.pointerId, button:event.button, startX: event.clientX, startY: event.clientY, scrollLeft: event.currentTarget.scrollLeft, scrollTop: event.currentTarget.scrollTop, canvas: event.currentTarget, moved:false };
     event.currentTarget.classList.add('panning');
     document.addEventListener('pointermove', panCanvas);
     document.addEventListener('pointerup', endCanvasPan, { once: true });
@@ -953,11 +1494,37 @@
 
   const panCanvas = event => {
     if (!panState || event.pointerId !== panState.pointerId) return;
-    panState.canvas.scrollLeft = panState.scrollLeft - (event.clientX - panState.startX);
-    panState.canvas.scrollTop = panState.scrollTop - (event.clientY - panState.startY);
+    const deltaX = event.clientX - panState.startX;
+    const deltaY = event.clientY - panState.startY;
+    panState.moved ||= Math.abs(deltaX) > 4 || Math.abs(deltaY) > 4;
+    const zoom = zoomLevel();
+    let targetLeft = panState.scrollLeft - deltaX;
+    let targetTop = panState.scrollTop - deltaY;
+    if (targetLeft < 0 || targetTop < 0) {
+      const shiftX = targetLeft < 0 ? (-targetLeft + DIAGRAM_PADDING) / zoom : 0;
+      const shiftY = targetTop < 0 ? (-targetTop + DIAGRAM_PADDING) / zoom : 0;
+      diagram.nodes.forEach(node => { node.x += shiftX; node.y += shiftY; });
+      (diagram.annotations || []).forEach(annotation => { annotation.x += shiftX; annotation.y += shiftY; });
+      diagram.edges.forEach(edge => (edge.waypoints || []).forEach(point => { point.x += shiftX; point.y += shiftY; }));
+      panState.scrollLeft += shiftX * zoom;
+      panState.scrollTop += shiftY * zoom;
+      renderDiagram();
+      targetLeft = panState.scrollLeft - deltaX;
+      targetTop = panState.scrollTop - deltaY;
+    }
+    const maxLeft = panState.canvas.scrollWidth - panState.canvas.clientWidth;
+    const maxTop = panState.canvas.scrollHeight - panState.canvas.clientHeight;
+    if (targetLeft > maxLeft || targetTop > maxTop) {
+      diagram.panPaddingX = (Number(diagram.panPaddingX) || 0) + (targetLeft > maxLeft ? (targetLeft - maxLeft) / zoom + DIAGRAM_PADDING : 0);
+      diagram.panPaddingY = (Number(diagram.panPaddingY) || 0) + (targetTop > maxTop ? (targetTop - maxTop) / zoom + DIAGRAM_PADDING : 0);
+      renderDiagram();
+    }
+    panState.canvas.scrollLeft = targetLeft;
+    panState.canvas.scrollTop = targetTop;
   };
 
   const endCanvasPan = () => {
+    if (panState?.moved && panState.button === 0) suppressCanvasClick = true;
     panState?.canvas.classList.remove('panning');
     document.removeEventListener('pointermove', panCanvas);
     panState = null;
@@ -991,9 +1558,59 @@
     bindInspector();
   };
 
+  const renderSchemaChanges = () => {
+    const changedNodes = diagram?.nodes.filter(node => node.tableChange || node.columns.some(column => column.change)) || [];
+    if (!changedNodes.length) return '';
+    return `<div class="diagram-inspector-section diagram-schema-changes">
+      <div class="diagram-changes-heading"><h3>Database changes <span>${changedNodes.length}</span></h3><button type="button" class="btn btn-primary btn-sm diagram-apply-all-changes">Update all</button></div>
+      <p>Saved diagram tables that differ from the current database.</p>
+      <div class="diagram-change-list">${changedNodes.map(node => {
+        const changes = node.columns.filter(column => column.change).length;
+        return `<div class="diagram-change-item"><button type="button" class="diagram-changed-table ${node.id === selectedNodeId ? 'active' : ''}" data-node-id="${escapeHtml(node.id)}"><strong>${escapeHtml(node.id)}</strong><small>${node.tableChange === 'deleted' ? 'Table deleted' : `${changes} field change${changes === 1 ? '' : 's'}`}</small></button><button type="button" class="btn btn-outline-primary btn-sm diagram-apply-table-changes" data-node-id="${escapeHtml(node.id)}">Update</button></div>`;
+      }).join('')}</div>
+    </div>`;
+  };
+
+  const applySchemaChanges = nodeId => {
+    const targets = diagram.nodes.filter(node => (!nodeId || node.id === nodeId) && (node.tableChange || node.columns.some(column => column.change)));
+    const removedNodeIds = new Set(targets.filter(node => node.tableChange === 'deleted').map(node => node.id));
+    const removedColumns = new Map();
+    targets.filter(node => !removedNodeIds.has(node.id)).forEach(node => {
+      removedColumns.set(node.id, new Set(node.columns.filter(column => column.change === 'deleted').map(column => column.name)));
+      node.columns = node.columns.filter(column => column.change !== 'deleted');
+      node.columns.forEach(column => {
+        if (column.change === 'new') {
+          column.hidden = false;
+          column.hiddenReason = null;
+        }
+        delete column.change;
+        delete column.changeDetails;
+        delete column.previousType;
+      });
+      node.tableChange = null;
+      if (node.widthMode === 'fit') fitNodeToContent(node);
+    });
+    diagram.nodes = diagram.nodes.filter(node => !removedNodeIds.has(node.id));
+    diagram.edges = diagram.edges.filter(edge => {
+      if (removedNodeIds.has(edge.from) || removedNodeIds.has(edge.to)) return false;
+      if (removedColumns.get(edge.from)?.has(edge.fromColumn)) return false;
+      if (removedColumns.get(edge.to)?.has(edge.toColumn)) return false;
+      return true;
+    });
+    removedNodeIds.forEach(id => selectedNodeIds.delete(id));
+    if (selectedNodeId && removedNodeIds.has(selectedNodeId)) selectedNodeId = [...selectedNodeIds].at(-1) || null;
+    refreshDiagramUi();
+    notify(nodeId ? `Updated ${nodeId} from the current database.` : 'Updated all diagram tables from the current database.');
+  };
+
   const renderInspector = () => {
+    const changes = renderSchemaChanges();
+    const displayOptions = `<div class="diagram-inspector-section diagram-display-options">
+      <h3>Display</h3>
+      <label><input id="diagram-show-type-length" class="form-check-input" type="checkbox" ${diagram?.showTypeLength === false ? '' : 'checked'}> <span>Show datatype max length<small>Apply to every table on this diagram.</small></span></label>
+    </div>`;
     const edge = selectedEdgeId ? edgeById(selectedEdgeId) : null;
-    if (edge) return `
+    if (edge) return `${changes}${displayOptions}
       <div class="diagram-inspector-section">
         <h3>Connector</h3>
         <p class="text-muted small mb-2">${escapeHtml(edge.fromColumn || edge.from)} → ${escapeHtml(edge.toColumn || edge.to)}</p>
@@ -1006,12 +1623,12 @@
           ${(edge.waypoints || []).length ? '<button id="diagram-reset-edge" class="btn btn-outline-secondary btn-sm">Reset path</button>' : ''}
           <button id="diagram-delete-edge" class="btn btn-outline-danger btn-sm">Delete connector</button>
         </div>
-        <p class="text-muted small mt-2 mb-0">The endpoint symbols show one or many. Drag a blue midpoint to move that horizontal or vertical run. Double-click the line to add a bend, or reset the path to return to automatic routing.</p>
+        <p class="text-muted small mt-2 mb-0">Drag either endpoint circle onto the left or right side of a field row to reconnect it. Drag a blue midpoint to move that horizontal or vertical run. Double-click the line to add a bend, or reset the path to return to automatic routing.</p>
       </div>`;
     const node = selectedNodeId ? nodeById(selectedNodeId) : null;
-    if (!node) return `<div class="empty-state compact">Select a table to edit its color, columns, visibility, or relationships.</div>
+    if (!node) return `${changes}${displayOptions}<div class="empty-state compact">Select a table to edit its color, columns, visibility, or relationships.</div>
       <div class="diagram-hidden-list">${diagram?.nodes.filter(item => item.hidden).map(item => `<button class="btn btn-outline-secondary btn-sm diagram-show-node" data-node-id="${escapeHtml(item.id)}">Show ${escapeHtml(item.id)}</button>`).join('') || ''}</div>`;
-    return `
+    return `${changes}${displayOptions}
       <div class="diagram-inspector-section">
         <h3>${escapeHtml(node.id)}</h3>
         <label class="form-label small" for="diagram-node-width">Table width</label>
@@ -1020,8 +1637,9 @@
           <output id="diagram-node-width-value" for="diagram-node-width">${node.width}px</output>
         </div>
         <button id="diagram-fit-node" class="btn btn-outline-secondary btn-sm mb-3" type="button">Fit content${node.widthMode === 'fit' ? ' · Default' : ''}</button>
-        <label class="form-label small">Header color</label>
-        <input id="diagram-node-color" type="color" class="form-control form-control-color" value="${escapeHtml(node.color)}">
+        <div class="diagram-color-control">
+          ${renderColorPicker('table-header', node.color, 'Header color')}
+        </div>
         <div class="d-flex gap-2 mt-2">
           <button id="diagram-collapse-node" class="btn btn-outline-secondary btn-sm">${node.collapsed ? 'Show columns' : 'Collapse'}</button>
           <button id="diagram-hide-node" class="btn btn-outline-danger btn-sm">Hide table</button>
@@ -1029,7 +1647,7 @@
       </div>
       <div class="diagram-inspector-section">
         <h3>Columns</h3>
-        ${node.columns.map(column => `<label class="diagram-column-toggle"><input type="checkbox" class="form-check-input diagram-column-visible" data-column="${escapeHtml(column.name)}" ${column.hidden ? '' : 'checked'}> <span>${column.pk ? '🔑 ' : ''}${escapeHtml(column.name)}</span></label>`).join('')}
+        ${node.columns.map(column => `<label class="diagram-column-toggle ${column.change ? `field-${column.change}` : column.hiddenReason === 'user' ? 'field-hidden-choice' : ''}"><input type="checkbox" class="form-check-input diagram-column-visible" data-column="${escapeHtml(column.name)}" ${column.hidden ? '' : 'checked'}> <span>${column.pk ? '🔑 ' : ''}${escapeHtml(column.name)}<small>${escapeHtml(column.change ? columnChangeLabel(column) : column.hiddenReason === 'user' ? `Hidden by choice · ${displayColumnType(column)}` : displayColumnType(column))}</small></span>${column.change ? `<em>${column.change}</em>` : column.hiddenReason === 'user' ? '<em class="visibility-choice">hidden</em>' : ''}</label>`).join('')}
       </div>
       <div class="diagram-inspector-section">
         <h3>Relationships</h3>
@@ -1038,7 +1656,19 @@
   };
 
   const bindInspector = () => {
-    byId('diagram-node-color')?.addEventListener('input', event => { const node = nodeById(selectedNodeId); if (node) { node.color = event.target.value; node.borderColor = event.target.value; renderDiagram(); } });
+    byId('diagram-show-type-length')?.addEventListener('change', event => {
+      diagram.showTypeLength = event.target.checked;
+      diagram.nodes.filter(node => node.widthMode === 'fit').forEach(fitNodeToContent);
+      refreshInspector();
+      renderDiagram();
+    });
+    document.querySelectorAll('.diagram-changed-table').forEach(button => button.addEventListener('click', () => selectNode(button.dataset.nodeId)));
+    document.querySelector('.diagram-apply-all-changes')?.addEventListener('click', () => applySchemaChanges());
+    document.querySelectorAll('.diagram-apply-table-changes').forEach(button => button.addEventListener('click', () => applySchemaChanges(button.dataset.nodeId)));
+    bindColorPicker(document.querySelector('.diagram-color-picker[data-color-context="table-header"]'), color => {
+      const node = nodeById(selectedNodeId);
+      if (node) { node.color = color; node.borderColor = color; refreshInspector(); renderDiagram(); }
+    });
     byId('diagram-node-width')?.addEventListener('input', event => {
       const node = nodeById(selectedNodeId);
       if (!node) return;
@@ -1058,12 +1688,13 @@
     byId('diagram-delete-edge')?.addEventListener('click', deleteSelectedEdge);
     byId('diagram-add-waypoint')?.addEventListener('click', addWaypointToSelectedEdge);
     byId('diagram-reset-edge')?.addEventListener('click', () => { const edge = edgeById(selectedEdgeId); if (edge) { edge.waypoints = []; refreshInspector(); renderDiagram(); } });
-    byId('diagram-hide-node')?.addEventListener('click', () => { const node = nodeById(selectedNodeId); if (node) { node.hidden = true; selectedNodeId = null; refreshInspector(); renderDiagram(); } });
+    byId('diagram-hide-node')?.addEventListener('click', () => { const node = nodeById(selectedNodeId); if (node) { node.hidden = true; selectedNodeIds.delete(node.id); selectedNodeId = [...selectedNodeIds].at(-1) || null; refreshInspector(); renderDiagram(); } });
     byId('diagram-collapse-node')?.addEventListener('click', () => { const node = nodeById(selectedNodeId); if (node) { node.collapsed = !node.collapsed; refreshInspector(); renderDiagram(); } });
     document.querySelectorAll('.diagram-column-visible').forEach(input => input.addEventListener('change', () => {
       const node = nodeById(selectedNodeId), column = node?.columns.find(item => item.name === input.dataset.column);
       if (column) {
         column.hidden = !input.checked;
+        column.hiddenReason = column.hidden ? (column.change === 'new' ? 'new' : 'user') : null;
         if (node.widthMode === 'fit') fitNodeToContent(node);
         refreshInspector();
         renderDiagram();
@@ -1091,7 +1722,7 @@
     };
     diagram.edges.push(edge);
     selectedEdgeId = edge.id;
-    selectedNodeId = null;
+    clearNodeSelection();
     notify('Relationship added.');
   };
 
@@ -1179,7 +1810,7 @@
     const node = { id, schema:'custom', name, x:DIAGRAM_PADDING, y:DIAGRAM_PADDING, width:MIN_NODE_WIDTH, widthMode:'fit', color:'#fff7ed', borderColor:'#f59e0b', hidden:false, collapsed:false, columns:[{ name:'Id', type:'int', pk:true, hidden:false }] };
     fitNodeToContent(node);
     diagram.nodes.push(node);
-    selectedNodeId = id;
+    selectOnlyNode(id);
     refreshDiagramUi();
   };
 
@@ -1208,11 +1839,12 @@
       const scale = 2;
       const padding = 96;
       const visible = new Set(visibleNodes.map(node => node.id));
+      const annotations = diagram.annotations || [];
       const connectorPoints = diagram.edges.filter(edge => visible.has(edge.from) && visible.has(edge.to)).flatMap(edge => edgePoints(edge));
-      const minX = Math.min(...visibleNodes.map(node => node.x), ...connectorPoints.map(point => point.x));
-      const minY = Math.min(...visibleNodes.map(node => node.y), ...connectorPoints.map(point => point.y));
-      const maxX = Math.max(...visibleNodes.map(node => node.x + node.width), ...connectorPoints.map(point => point.x));
-      const maxY = Math.max(...visibleNodes.map(node => node.y + nodeHeight(node)), ...connectorPoints.map(point => point.y));
+      const minX = Math.min(...visibleNodes.map(node => node.x), ...annotations.map(item => item.x), ...connectorPoints.map(point => point.x));
+      const minY = Math.min(...visibleNodes.map(node => node.y), ...annotations.map(item => item.y), ...connectorPoints.map(point => point.y));
+      const maxX = Math.max(...visibleNodes.map(node => node.x + node.width), ...annotations.map(item => item.x + item.width), ...connectorPoints.map(point => point.x));
+      const maxY = Math.max(...visibleNodes.map(node => node.y + nodeHeight(node)), ...annotations.map(item => item.y + item.height), ...connectorPoints.map(point => point.y));
       const width = Math.max(1, Math.ceil(maxX - minX));
       const height = Math.max(1, Math.ceil(maxY - minY));
       const canvas = document.createElement('canvas');
@@ -1223,13 +1855,43 @@
       ctx.fillStyle = '#ffffff';
       ctx.fillRect(0, 0, width + padding * 2, height + padding * 2);
       ctx.translate(padding - minX, padding - minY);
+      annotations.filter(item => item.type === 'box').forEach(item => drawPngAnnotation(ctx, item));
       drawPngEdges(ctx);
       visibleNodes.forEach(node => drawPngNode(ctx, node));
+      annotations.filter(item => item.type !== 'box').forEach(item => drawPngAnnotation(ctx, item));
       const link = document.createElement('a');
       link.download = `${safeFileName(diagram.name || selectedSchema.sourceName)}.png`;
       link.href = canvas.toDataURL('image/png');
       link.click();
     } catch (error) { notify(`Unable to export diagram: ${error.message}`, true); }
+  };
+
+  const drawPngAnnotation = (ctx, annotation) => {
+    ctx.save();
+    if (annotation.type === 'box') {
+      ctx.globalAlpha = .32;
+      ctx.fillStyle = annotation.color;
+      ctx.fillRect(annotation.x, annotation.y, annotation.width, annotation.height);
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = darkenHexColor(annotation.color, .72);
+      ctx.lineWidth = 3;
+      ctx.strokeRect(annotation.x, annotation.y, annotation.width, annotation.height);
+      ctx.fillStyle = darkenHexColor(annotation.color, .42);
+      ctx.font = 'bold 13px Segoe UI, Arial';
+      ctx.fillText(annotation.text, annotation.x + 10, annotation.y + 20, annotation.width - 20);
+    } else {
+      ctx.fillStyle = annotation.color;
+      ctx.font = 'bold 18px Segoe UI, Arial';
+      ctx.fillText(annotation.text, annotation.x + 6, annotation.y + 28, annotation.width - 12);
+    }
+    ctx.restore();
+  };
+
+  const darkenHexColor = (color, factor) => {
+    const match = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(String(color || ''));
+    if (!match) return color || '#475569';
+    const channel = value => Math.max(0, Math.min(255, Math.round(parseInt(value, 16) * factor))).toString(16).padStart(2, '0');
+    return `#${channel(match[1])}${channel(match[2])}${channel(match[3])}`;
   };
 
   const drawPngEdges = ctx => {
@@ -1299,7 +1961,7 @@
       ctx.fillStyle = '#111827';
       ctx.fillText(column.name, node.x + 28, y, node.width - 90);
       ctx.fillStyle = '#667085';
-      ctx.fillText(column.type || '', node.x + node.width - 70, y, 62);
+      ctx.fillText(displayColumnType(column), node.x + node.width - 70, y, 62);
     });
   };
 

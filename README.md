@@ -67,6 +67,19 @@ For an IIS sub-application hosted at `http://server/DevTools`, configure:
 
 Leave `PathBase` empty when hosting DevTools at the website root.
 
+Individual tools can be removed from the home screen and their MVC routes by setting their switch to `false`:
+
+```json
+"Tools": {
+  "Hash": true,
+  "Formatter": true,
+  "Logs": true,
+  "SystemLogs": true,
+  "SystemServices": true,
+  "SqlDoc": true
+}
+```
+
 For a repeatable IIS deployment, run PowerShell as Administrator from the repository root:
 
 ```powershell

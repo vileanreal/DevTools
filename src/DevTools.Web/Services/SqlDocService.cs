@@ -200,7 +200,8 @@ public sealed class SqlDocService(DevToolsDbContext database, IWebHostEnvironmen
                         GetString(reader, "type", "TEXT"),
                         GetInt(reader, "notnull") == 0,
                         GetInt(reader, "pk") > 0,
-                        GetNullableString(reader, "dflt_value")));
+                        GetNullableString(reader, "dflt_value"),
+                        DeclaredMaxLength(GetString(reader, "type", "TEXT"))));
                 }
             }
 
@@ -280,7 +281,7 @@ public sealed class SqlDocService(DevToolsDbContext database, IWebHostEnvironmen
             var name = row["name"];
             var columns = columnRows
                 .Where(column => column["schema_name"].Equals(schema, StringComparison.OrdinalIgnoreCase) && column["object_name"].Equals(name, StringComparison.OrdinalIgnoreCase))
-                .Select(column => new SqlDocColumn(column["name"], column["type_name"], column["nullable"].Equals("YES", StringComparison.OrdinalIgnoreCase), pkSet.Contains($"{schema}.{name}.{column["name"]}"), EmptyToNull(column["default_value"])))
+                .Select(column => new SqlDocColumn(column["name"], column["type_name"], column["nullable"].Equals("YES", StringComparison.OrdinalIgnoreCase), pkSet.Contains($"{schema}.{name}.{column["name"]}"), EmptyToNull(column["default_value"]), ParseMaxLength(column.GetValueOrDefault("max_length"))))
                 .ToList();
             var foreignKeys = foreignKeyRows
                 .Where(fk => fk["schema_name"].Equals(schema, StringComparison.OrdinalIgnoreCase) && fk["object_name"].Equals(name, StringComparison.OrdinalIgnoreCase))
@@ -326,7 +327,7 @@ public sealed class SqlDocService(DevToolsDbContext database, IWebHostEnvironmen
                 var schema = row["schema_name"];
                 var name = row["name"];
                 var columns = columnRows.Where(column => column["schema_name"].Equals(schema, StringComparison.OrdinalIgnoreCase) && column["object_name"].Equals(name, StringComparison.OrdinalIgnoreCase))
-                    .Select(column => new SqlDocColumn(column["name"], column["type_name"], column["nullable"].Equals("YES", StringComparison.OrdinalIgnoreCase), pkSet.Contains($"{schema}.{name}.{column["name"]}"), EmptyToNull(column["default_value"]))).ToList();
+                    .Select(column => new SqlDocColumn(column["name"], column["type_name"], column["nullable"].Equals("YES", StringComparison.OrdinalIgnoreCase), pkSet.Contains($"{schema}.{name}.{column["name"]}"), EmptyToNull(column["default_value"]), ParseMaxLength(column.GetValueOrDefault("max_length")))).ToList();
                 var foreignKeys = foreignKeyRows.Where(fk => fk["schema_name"].Equals(schema, StringComparison.OrdinalIgnoreCase) && fk["object_name"].Equals(name, StringComparison.OrdinalIgnoreCase))
                     .Select(fk => new SqlDocForeignKey(fk["name"], fk["column_name"], $"{fk["ref_schema"]}.{fk["ref_table"]}", fk["ref_column"])).ToList();
                 return new SqlDocTable(schema, name, columns, foreignKeys);
@@ -425,8 +426,8 @@ public sealed class SqlDocService(DevToolsDbContext database, IWebHostEnvironmen
         : "SELECT table_schema AS schema_name, table_name AS name FROM information_schema.tables WHERE table_type = 'BASE TABLE' AND table_schema NOT IN ('information_schema','pg_catalog') ORDER BY table_schema, table_name";
 
     private static string InformationSchemaColumnsSql(string provider) => provider.Equals("oracle", StringComparison.OrdinalIgnoreCase)
-        ? "SELECT owner AS schema_name, table_name AS object_name, column_name AS name, data_type AS type_name, nullable AS nullable, data_default AS default_value FROM all_tab_columns WHERE owner NOT IN ('SYS','SYSTEM') ORDER BY owner, table_name, column_id"
-        : "SELECT table_schema AS schema_name, table_name AS object_name, column_name AS name, data_type AS type_name, is_nullable AS nullable, column_default AS default_value FROM information_schema.columns WHERE table_schema NOT IN ('information_schema','pg_catalog') ORDER BY table_schema, table_name, ordinal_position";
+        ? "SELECT owner AS schema_name, table_name AS object_name, column_name AS name, data_type AS type_name, char_length AS max_length, nullable AS nullable, data_default AS default_value FROM all_tab_columns WHERE owner NOT IN ('SYS','SYSTEM') ORDER BY owner, table_name, column_id"
+        : "SELECT table_schema AS schema_name, table_name AS object_name, column_name AS name, data_type AS type_name, character_maximum_length AS max_length, is_nullable AS nullable, column_default AS default_value FROM information_schema.columns WHERE table_schema NOT IN ('information_schema','pg_catalog') ORDER BY table_schema, table_name, ordinal_position";
 
     private static string InformationSchemaPrimaryKeysSql(string provider) => provider.Equals("oracle", StringComparison.OrdinalIgnoreCase)
         ? "SELECT cons.owner AS schema_name, cols.table_name AS object_name, cols.column_name AS column_name FROM all_constraints cons JOIN all_cons_columns cols ON cons.owner = cols.owner AND cons.constraint_name = cols.constraint_name WHERE cons.constraint_type = 'P'"
@@ -943,4 +944,12 @@ public sealed class SqlDocService(DevToolsDbContext database, IWebHostEnvironmen
     private static string GetString(DbDataReader reader, string name, string fallback = "") => reader.IsDBNull(reader.GetOrdinal(name)) ? fallback : reader.GetString(reader.GetOrdinal(name));
     private static string? GetNullableString(DbDataReader reader, string name) => reader.IsDBNull(reader.GetOrdinal(name)) ? null : Convert.ToString(reader.GetValue(reader.GetOrdinal(name)), CultureInfo.InvariantCulture);
     private static int GetInt(DbDataReader reader, string name) => Convert.ToInt32(reader.GetValue(reader.GetOrdinal(name)), CultureInfo.InvariantCulture);
+    private static int? DeclaredMaxLength(string dataType)
+    {
+        var match = Regex.Match(dataType, @"\(\s*(\d+)\s*\)\s*$", RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100));
+        return match.Success && int.TryParse(match.Groups[1].Value, NumberStyles.None, CultureInfo.InvariantCulture, out var value) ? value : null;
+    }
+
+    private static int? ParseMaxLength(string? value) =>
+        int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) ? parsed : null;
 }

@@ -1,5 +1,6 @@
 using DevTools.Application;
 using DevTools.Web.Data;
+using DevTools.Web.Models;
 using DevTools.Web.Security;
 using DevTools.Web.Services;
 using Microsoft.AspNetCore.Authentication.Cookies;
@@ -38,6 +39,8 @@ var logIndexConnectionString = new SqliteConnectionStringBuilder
 
 // Add services to the container.
 builder.Services.AddControllersWithViews();
+builder.Services.AddOptions<ToolOptions>()
+    .Bind(builder.Configuration.GetSection(ToolOptions.SectionName));
 var loginSection = builder.Configuration.GetSection(LoginOptions.SectionName);
 var useLogin = loginSection.GetValue(nameof(LoginOptions.UseLogin), true);
 builder.Services.AddOptions<LoginOptions>()

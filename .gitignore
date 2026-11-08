@@ -23,6 +23,8 @@
 *.user
 *.suo
 *.log
+.DS_Store
+src/DevTools.Web/sample-logs/
 
 # Local configuration overrides and secrets
 .env

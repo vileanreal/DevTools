@@ -1,4 +1,6 @@
 @model string
+@using DevTools.Web.Models
+@inject Microsoft.Extensions.Options.IOptions<ToolOptions> ToolConfiguration
 @{
     var tools = new[]
     {
@@ -8,7 +10,7 @@
         new { Key = "system-logs", Group = "Observe & operate", Tone = "tone-4", Title = "System logs", Description = "Index, filter, chart, and inspect log folders.", Icon = "▦", Action = "SystemLogs" },
         new { Key = "system-services", Group = "Observe & operate", Tone = "tone-5", Title = "System Services", Description = "Monitor and control local services and IIS app pools.", Icon = "⚙", Action = "SystemServices" },
         new { Key = "sql-doc", Group = "Database", Tone = "tone-6", Title = "SQL Doc", Description = "Inspect databases, export docs, and draw diagrams.", Icon = "DB", Action = "SqlDoc" }
-    };
+    }.Where(tool => ToolConfiguration.Value.IsEnabled(tool.Key)).ToArray();
 }
 
 <div class="app-shell no-sidebar">

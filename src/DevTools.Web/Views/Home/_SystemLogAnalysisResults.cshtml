@@ -91,7 +91,7 @@
 {
     var windowStart = Math.Max(1, Model.Page - 2);
     var windowEnd = Math.Min(Model.TotalPages, Model.Page + 2);
-    <nav class="pager-row" aria-label="Log pages">
+    <nav class="pager-row" aria-label="Log pages" data-current-page="@Model.Page" data-total-pages="@Model.TotalPages">
         <button class="btn btn-sm btn-outline-secondary page-link-button" data-page="@(Model.Page - 1)" disabled="@(Model.Page <= 1)">Previous</button>
         <div class="page-numbers">
             @if (windowStart > 1)

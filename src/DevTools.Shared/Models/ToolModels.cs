@@ -135,7 +135,7 @@ public sealed record SqlDocSchema(
     IReadOnlyList<SqlDocRoutine> Functions,
     IReadOnlyList<SqlDocIndex> Indexes);
 public sealed record SqlDocTable(string Schema, string Name, IReadOnlyList<SqlDocColumn> Columns, IReadOnlyList<SqlDocForeignKey> ForeignKeys);
-public sealed record SqlDocColumn(string Name, string DataType, bool IsNullable, bool IsPrimaryKey, string? DefaultValue);
+public sealed record SqlDocColumn(string Name, string DataType, bool IsNullable, bool IsPrimaryKey, string? DefaultValue, int? MaxLength = null);
 public sealed record SqlDocForeignKey(string Name, string ColumnName, string ReferencedTable, string ReferencedColumn);
 public sealed record SqlDocView(string Schema, string Name, string? Definition);
 public sealed record SqlDocRoutine(string Schema, string Name, string? Definition);
