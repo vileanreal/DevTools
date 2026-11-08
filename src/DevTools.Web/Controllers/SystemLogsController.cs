@@ -121,6 +121,8 @@ public sealed class SystemLogsController(ISystemLogService service, ILogIndexSer
     [HttpGet("systems/{systemId:int}/analysis")]
     public async Task<IActionResult> Analysis(int systemId, [FromQuery] SystemLogQuery query, CancellationToken cancellationToken)
     {
+        var searchError = ValidateSearch(query);
+        if (searchError is not null) return BadRequest(new { error = searchError });
         var page = await indexService.QueryAsync(systemId, query, cancellationToken);
         return page is null ? NotFound() : PartialView("~/Views/Home/_SystemLogAnalysisResults.cshtml", page);
     }
@@ -145,6 +147,24 @@ public sealed class SystemLogsController(ISystemLogService service, ILogIndexSer
     {
         if (string.IsNullOrWhiteSpace(moduleName) || moduleName.Trim().Length > 120) return "Module name is required and must be 120 characters or fewer.";
         if (string.IsNullOrWhiteSpace(path) || path.Trim().Length > 2048) return "A valid log file or folder path is required.";
+        return null;
+    }
+
+    private static string? ValidateSearch(SystemLogQuery query)
+    {
+        string[] supportedModes = ["contains", "notcontains", "regex"];
+        if (!supportedModes.Contains(query.SearchMode, StringComparer.OrdinalIgnoreCase))
+            return "Choose a supported message filter mode.";
+        if (query.Search?.Length > 200) return "Message filters must be 200 characters or fewer.";
+        if (!query.SearchMode.Equals("regex", StringComparison.OrdinalIgnoreCase) || string.IsNullOrWhiteSpace(query.Search)) return null;
+        try
+        {
+            _ = new System.Text.RegularExpressions.Regex(
+                query.Search,
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant,
+                TimeSpan.FromMilliseconds(250));
+        }
+        catch (ArgumentException) { return "The message regex pattern is invalid."; }
         return null;
     }
 

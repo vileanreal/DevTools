@@ -27,6 +27,7 @@ public sealed record SystemLogQuery(
     int? SourceId = null,
     string? Level = null,
     string? Search = null,
+    string SearchMode = "contains",
     DateTimeOffset? From = null,
     DateTimeOffset? To = null,
     int Page = 1,

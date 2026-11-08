@@ -98,7 +98,10 @@ builder.Services.AddRateLimiter(options =>
 });
 builder.Services.AddDevToolsApplication();
 builder.Services.AddDbContext<DevToolsDbContext>(options => options.UseSqlite(configurationConnectionString));
-builder.Services.AddDbContext<LogIndexDbContext>(options => options.UseSqlite(logIndexConnectionString));
+builder.Services.AddSingleton<SqliteRegexConnectionInterceptor>();
+builder.Services.AddDbContext<LogIndexDbContext>((services, options) => options
+    .UseSqlite(logIndexConnectionString)
+    .AddInterceptors(services.GetRequiredService<SqliteRegexConnectionInterceptor>()));
 builder.Services.AddScoped<ISystemLogService, SystemLogService>();
 builder.Services.AddScoped<ILogIndexService, LogIndexService>();
 builder.Services.AddSingleton<ILogIndexOperationCoordinator, LogIndexOperationCoordinator>();

@@ -137,7 +137,7 @@ public sealed partial class LogIndexService(DevToolsDbContext database, LogIndex
         var moduleNames = sourceRows.ToDictionary(item => item.Id, item => item.ModuleName);
         var page = Math.Max(1, query.Page);
         var pageSize = Math.Clamp(query.PageSize, 10, 200);
-        IQueryable<IndexedLogEntry> rootEntries = CreateSearchQuery(query.Search);
+        IQueryable<IndexedLogEntry> rootEntries = CreateSearchQuery(query.Search, query.SearchMode);
         rootEntries = rootEntries.Where(item => sourceIds.Contains(item.LogSourceId));
         var entries = rootEntries;
         if (query.From.HasValue)
@@ -179,8 +179,8 @@ public sealed partial class LogIndexService(DevToolsDbContext database, LogIndex
         if (chartLevels.Count == 0) chartLevels = allowedLevels.ToList();
         var version = IndexVersions.GetOrAdd(systemId, 0);
         var chartLevelKey = string.Join(',', chartLevels);
-        var rowFilterKey = $"{systemId}:{version}:{query.SourceId}:{query.Level}:{query.Search}:{query.From?.UtcTicks}:{query.To?.UtcTicks}";
-        var chartFilterKey = $"{systemId}:{version}:{query.SourceId}:{query.Search}:{chartFrom?.UtcTicks}:{chartTo?.UtcTicks}:{timeBucket}:{chartLevelKey}";
+        var rowFilterKey = $"{systemId}:{version}:{query.SourceId}:{query.Level}:{query.SearchMode}:{query.Search}:{query.From?.UtcTicks}:{query.To?.UtcTicks}";
+        var chartFilterKey = $"{systemId}:{version}:{query.SourceId}:{query.SearchMode}:{query.Search}:{chartFrom?.UtcTicks}:{chartTo?.UtcTicks}:{timeBucket}:{chartLevelKey}";
         var summary = await cache.GetOrCreateAsync($"summary:{rowFilterKey}", async cacheEntry =>
         {
             cacheEntry.AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(2); cacheEntry.Size = 2;
@@ -282,9 +282,17 @@ public sealed partial class LogIndexService(DevToolsDbContext database, LogIndex
         return file is null ? null : new LogFileDownload(file.Path, file.FileName);
     }
 
-    private IQueryable<IndexedLogEntry> CreateSearchQuery(string? search)
+    private IQueryable<IndexedLogEntry> CreateSearchQuery(string? search, string? searchMode)
     {
-        var normalizedSearch = string.IsNullOrWhiteSpace(search) ? string.Empty : search[..Math.Min(search.Length, 200)];
+        var normalizedSearch = string.IsNullOrWhiteSpace(search) ? string.Empty : search.Trim()[..Math.Min(search.Trim().Length, 200)];
+        if (normalizedSearch.Length == 0) return indexDatabase.IndexedLogEntries.AsNoTracking();
+        if (searchMode?.Equals("regex", StringComparison.OrdinalIgnoreCase) == true)
+            return indexDatabase.IndexedLogEntries.AsNoTracking().Where(item => Regex.IsMatch(item.Message, normalizedSearch));
+        if (searchMode?.Equals("notcontains", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            var normalizedLower = normalizedSearch.ToLowerInvariant();
+            return indexDatabase.IndexedLogEntries.AsNoTracking().Where(item => !item.Message.ToLower().Contains(normalizedLower));
+        }
         var terms = normalizedSearch.Length == 0 ? [] : SearchTermPattern().Matches(normalizedSearch).Select(match => match.Value).Take(10).ToArray();
         if (terms.Length == 0) return indexDatabase.IndexedLogEntries.AsNoTracking();
         var ftsQuery = string.Join(" AND ", terms.Select(term => $"\"{term.Replace("\"", "\"\"")}\""));
