@@ -1084,9 +1084,11 @@ html[data-theme="dark"] .patch-chip.latest { border-color:rgba(34,197,94,.35); b
 .patch-group-row th { top:28px; }
 .patch-folder-caret { font-size:.62rem; transform:rotate(90deg); text-align:center; }
 .patch-folder-row.collapsed .patch-folder-caret { transform:rotate(0deg); }
-/* System Logs: the Index logs action stands out from the filters */
-.log-index-btn { --bs-btn-color:#fff; --bs-btn-bg:#f79009; --bs-btn-border-color:#f79009; --bs-btn-hover-color:#fff; --bs-btn-hover-bg:#dc6803; --bs-btn-hover-border-color:#dc6803; --bs-btn-active-color:#fff; --bs-btn-active-bg:#b54708; --bs-btn-active-border-color:#b54708; --bs-btn-disabled-color:#fff; --bs-btn-disabled-bg:#f79009; --bs-btn-disabled-border-color:#f79009; display:inline-flex; align-items:center; gap:.4rem; padding-inline:.95rem; font-weight:750; box-shadow:0 4px 12px rgba(247,144,9,.35); }
-.log-index-btn:hover { box-shadow:0 6px 16px rgba(220,104,3,.4); }
-.log-index-icon { display:inline-block; font-size:1.05rem; line-height:1; }
-.log-index-btn:hover .log-index-icon { transform:rotate(90deg); transition:transform .2s; }
-.dock-index-actions .log-index-btn { min-height:35px; }
+/* System Logs: the Index logs action stands out from the filters (blue to violet) */
+.log-index-btn { --bs-btn-color:#fff; --bs-btn-hover-color:#fff; --bs-btn-active-color:#fff; --bs-btn-disabled-color:#fff; display:inline-flex; align-items:center; gap:.5rem; min-height:40px; padding:.45rem 1.25rem; border:0; border-radius:10px; background:linear-gradient(135deg,#2563eb 0%,#7c3aed 100%); color:#fff; font-size:.9rem; font-weight:750; box-shadow:0 6px 16px rgba(99,70,235,.35); transition:filter .15s, box-shadow .15s, transform .15s; }
+.log-index-btn:hover,.log-index-btn:focus-visible { background:linear-gradient(135deg,#1d4ed8 0%,#6d28d9 100%); color:#fff; box-shadow:0 8px 20px rgba(99,70,235,.45); transform:translateY(-1px); }
+.log-index-btn:active { transform:none; }
+.log-index-btn:disabled { background:linear-gradient(135deg,#2563eb 0%,#7c3aed 100%); color:#fff; opacity:.7; }
+.log-index-icon { display:inline-block; font-size:1.2rem; line-height:1; transition:transform .2s; }
+.log-index-btn:hover .log-index-icon { transform:rotate(90deg); }
+.dock-index-actions .log-index-btn { min-height:40px; }
