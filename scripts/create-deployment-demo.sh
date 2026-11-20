@@ -12,9 +12,9 @@
 #   scripts/create-deployment-demo.sh --populate [N]    # also upload N test packages (default 24) to try
 #                                                       # pagination, badges and history; some are deployed and
 #                                                       # the last deployment is rolled back
-#   scripts/create-deployment-demo.sh --patch-demo     # mock system for Deployment Patch Management: build folders
+#   scripts/create-deployment-demo.sh --patch-demo     # mock system for Releases: build folders
 #                                                       # at v1 marked as the latest version, then a simulated v2
-#                                                       # build so View changes / Compile patch have changes to show
+#                                                       # build so the module table and Compile have changes to show
 #   scripts/create-deployment-demo.sh --make-packages [N]
 #                                                       # only write N test packages (default 24) to
 #                                                       # ~/Downloads/SampleApp-test-packages for uploading by hand;
@@ -71,7 +71,7 @@ build_test_package() {
   echo "$zip_path"
 }
 
-# ---------- Mock system for Deployment Patch Management ----------
+# ---------- Mock system for Releases ----------
 if [[ "$PATCH_DEMO" -eq 1 ]]; then
   build="$DEMO_ROOT/build"
   patch_system="${PATCH_SYSTEM_NAME:-Sample App Patches}"
@@ -99,7 +99,7 @@ if [[ "$PATCH_DEMO" -eq 1 ]]; then
 import json,sys
 print(next((str(s["id"]) for s in json.load(sys.stdin)["data"] if s["name"]==sys.argv[1]), ""))' "$patch_system")
   if [[ -z "$system_id" ]]; then
-    echo "Registering '$patch_system' in Deployment Patch Management..."
+    echo "Registering '$patch_system' in Releases..."
     system_id=$(curl -fsS -X POST "$papi/systems" -H 'Content-Type: application/json' \
       -d "{\"name\":$(jstr "$patch_system"),\"outputDirectory\":$(jstr "$DEMO_ROOT/patches")}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["data"]["id"])')
     curl -fsS -o /dev/null -X POST "$papi/systems/$system_id/modules" -H 'Content-Type: application/json' \
@@ -128,7 +128,7 @@ print(next((str(s["id"]) for s in json.load(sys.stdin)["data"] if s["name"]==sys
   write "$build/Worker/Plugins/PdfExporter.dll"           "PdfExporter v1.1.0 (new)"        # ADDED
   rm -f "$build/Worker/Plugins/CsvExporter.dll"                                              # DELETED
 
-  echo "Done. Open $DEVTOOLS_URL/tools/patch-management?system=$system_id and click View changes."
+  echo "Done. Open $DEVTOOLS_URL/tools/patch-management?system=$system_id — the pending changes load automatically."
   echo "Expected: 4 changed, 3 added, 2 deleted (web.config, logs/ and the untouched Reports.dll are not listed)."
   exit 0
 fi

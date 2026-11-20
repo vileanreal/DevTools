@@ -76,4 +76,54 @@ public sealed class PatchDiffTests
     [InlineData("CHANGED", "Worker", @"Plugins\x.dll", "Worker/CHANGED/Plugins/x.dll")]
     public void ArchiveEntry_UsesModuleThenKindFolders(string kind, string module, string path, string expected) =>
         Assert.Equal(expected, PatchDiff.ArchiveEntry(kind, module, path));
+
+    private static PatchModuleManifest Module(int id, string name, params PatchFileEntry[] files) => new(id, name, files);
+
+    [Fact]
+    public void CompareEach_MeasuresEveryModuleFromItsOwnBase()
+    {
+        // WebApi was delivered in a later patch than Worker, so their bases are different snapshots.
+        var webApiBase = Module(1, "WebApi", File("api.dll", "A2"));
+        var workerBase = Module(2, "Worker", File("w.dll", "W1"));
+        var result = PatchDiff.CompareEach([
+            new PatchModuleComparison(1, "WebApi", 20, Time.AddDays(5), "Patch 2", webApiBase, Module(1, "WebApi", File("api.dll", "A2"))),
+            new PatchModuleComparison(2, "Worker", 10, Time, "Baseline", workerBase, Module(2, "Worker", File("w.dll", "W2")))
+        ]);
+
+        Assert.Equal(["Worker/w.dll"], result.Files.Select(file => $"{file.Module}/{file.Path}"));
+        var webApi = result.Modules.Single(item => item.Module == "WebApi");
+        Assert.Equal((0, 0, 0, 20, "Patch 2"), (webApi.Added, webApi.Changed, webApi.Deleted, webApi.BaseSnapshotId!.Value, webApi.BaseLabel));
+        var worker = result.Modules.Single(item => item.Module == "Worker");
+        Assert.Equal((1, 2, 10), (worker.Changed, worker.ModuleId!.Value, worker.BaseSnapshotId!.Value));
+    }
+
+    [Fact]
+    public void CompareEach_ModuleWithoutBase_HasEveryFileAdded()
+    {
+        var result = PatchDiff.CompareEach([new PatchModuleComparison(3, "Reports", null, null, null, null, Module(3, "Reports", File("r.dll", "1"), File("r.pdb", "2")))]);
+
+        Assert.All(result.Files, file => Assert.Equal(PatchChangeKinds.Added, file.Kind));
+        Assert.Null(Assert.Single(result.Modules).BaseSnapshotId);
+    }
+
+    [Fact]
+    public void CompareEach_RenamedModule_IsComparedByIdNotReportedAsDeletedAndAdded()
+    {
+        var result = PatchDiff.CompareEach([new PatchModuleComparison(1, "Api", 5, Time, null, Module(1, "WebApi", File("a.dll", "1")), Module(1, "Api", File("a.dll", "1")))]);
+
+        Assert.Empty(result.Files);
+        Assert.Equal("Api", Assert.Single(result.Modules).Module);
+    }
+
+    [Fact]
+    public void CompareEach_OrdersModulesByName()
+    {
+        var result = PatchDiff.CompareEach([
+            new PatchModuleComparison(2, "Worker", null, null, null, null, Module(2, "Worker", File("w", "1"))),
+            new PatchModuleComparison(1, "Api", null, null, null, null, Module(1, "Api", File("a", "1")))
+        ]);
+
+        Assert.Equal(["Api", "Worker"], result.Modules.Select(item => item.Module));
+        Assert.Equal(["Api", "Worker"], result.Files.Select(item => item.Module));
+    }
 }

@@ -43,6 +43,31 @@ public static class PatchDiff
         return (ordered, summaries);
     }
 
+    /// <summary>
+    /// Compares each module separately with its own base (a module's latest version can live in a different snapshot from
+    /// another's). Both sides take the comparison's name, so a renamed module isn't reported as deleted and re-added.
+    /// Every module gets a summary, even with no changes; the result is ordered by module, kind and path.
+    /// </summary>
+    public static PatchChangeSet CompareEach(IEnumerable<PatchModuleComparison> comparisons)
+    {
+        var files = new List<PatchFileChange>();
+        var summaries = new List<PatchModuleChangeSummary>();
+        foreach (var comparison in comparisons.OrderBy(item => item.Name, StringComparer.OrdinalIgnoreCase))
+        {
+            PatchModuleManifest[] baseline = comparison.BaseFiles is null ? [] : [comparison.BaseFiles with { ModuleName = comparison.Name }];
+            var (changes, modules) = Compare(baseline, [comparison.Current with { ModuleName = comparison.Name }]);
+            files.AddRange(changes);
+            summaries.Add((modules.FirstOrDefault() ?? new PatchModuleChangeSummary(comparison.Name, 0, 0, 0)) with
+            {
+                ModuleId = comparison.ModuleId,
+                BaseSnapshotId = comparison.BaseSnapshotId,
+                BaseCreatedAt = comparison.BaseCreatedAt,
+                BaseLabel = comparison.BaseLabel
+            });
+        }
+        return new PatchChangeSet(summaries, files);
+    }
+
     /// <summary>Entry name inside a patch archive: module first, then the kind, e.g. "WebApi/ADDED/bin/App.dll".</summary>
     public static string ArchiveEntry(string kind, string module, string path) => $"{module}/{kind}/{path.Replace('\\', '/').TrimStart('/')}";
 

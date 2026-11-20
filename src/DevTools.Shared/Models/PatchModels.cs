@@ -20,14 +20,22 @@ public sealed record PatchFileEntry(string Path, long Size, DateTime LastWriteUt
 /// <summary>The files of one module at a point in time.</summary>
 public sealed record PatchModuleManifest(int ModuleId, string ModuleName, IReadOnlyList<PatchFileEntry> Files);
 
-public sealed record PatchModuleDto(int Id, int SystemId, string Name, string SourcePath, string? Exclusions);
+/// <summary>A module and its own latest version: the snapshot its changes are measured from.</summary>
+public sealed record PatchModuleDto(
+    int Id,
+    int SystemId,
+    string Name,
+    string SourcePath,
+    string? Exclusions,
+    int? LatestSnapshotId = null,
+    DateTimeOffset? LatestAt = null,
+    string? LatestLabel = null);
 public sealed record PatchSystemDto(
     int Id,
     string Name,
     string? OutputDirectory,
     string EffectiveOutputDirectory,
-    IReadOnlyList<PatchModuleDto> Modules,
-    PatchSnapshotDto? LatestVersion);
+    IReadOnlyList<PatchModuleDto> Modules);
 public sealed record SavePatchSystemRequest(string? Name, string? OutputDirectory);
 public sealed record SavePatchModuleRequest(string? Name, string? SourcePath, string? Exclusions);
 
@@ -42,10 +50,34 @@ public sealed record PatchSnapshotDto(
     DateTimeOffset? MarkedLatestAt,
     int FileCount,
     long TotalBytes,
-    int? PatchId);
+    int? PatchId,
+    IReadOnlyList<string> Modules,
+    IReadOnlyList<string> LatestFor);
 
 public sealed record PatchFileChange(string Module, string Path, string Kind, long? Size, long? PreviousSize);
-public sealed record PatchModuleChangeSummary(string Module, int Added, int Changed, int Deleted);
+/// <summary>Change counts of one module and the snapshot they were measured from (none when the module has no version yet).</summary>
+public sealed record PatchModuleChangeSummary(
+    string Module,
+    int Added,
+    int Changed,
+    int Deleted,
+    int? ModuleId = null,
+    int? BaseSnapshotId = null,
+    DateTimeOffset? BaseCreatedAt = null,
+    string? BaseLabel = null);
+
+/// <summary>One module to compare: its base files (null when it has no version yet) and its files now or in a later snapshot.</summary>
+public sealed record PatchModuleComparison(
+    int? ModuleId,
+    string Name,
+    int? BaseSnapshotId,
+    DateTimeOffset? BaseCreatedAt,
+    string? BaseLabel,
+    PatchModuleManifest? BaseFiles,
+    PatchModuleManifest Current);
+
+/// <summary>The exact change list stored with a compiled patch.</summary>
+public sealed record PatchChangeSet(IReadOnlyList<PatchModuleChangeSummary> Modules, IReadOnlyList<PatchFileChange> Files);
 
 /// <summary>Differences between a base snapshot and the current files (or another snapshot).</summary>
 public sealed record PatchChangesDto(
@@ -61,8 +93,10 @@ public sealed record PatchChangesDto(
     IReadOnlyList<PatchFileChange> Files,
     bool Truncated);
 
-public sealed record CompilePatchRequest(string? Format, int? BaseSnapshotId, string? Label);
-public sealed record SetLatestRequest(string? Label);
+/// <summary>Compiles the selected modules' changes. Without module ids every module is included.</summary>
+public sealed record CompilePatchRequest(string? Format, int? BaseSnapshotId, string? Label, IReadOnlyList<int>? ModuleIds = null, bool SetAsLatest = false);
+/// <summary>Takes a snapshot of the selected modules (all when empty) and makes it their latest version.</summary>
+public sealed record SetLatestRequest(string? Label, IReadOnlyList<int>? ModuleIds = null);
 
 public sealed record PatchPackageDto(
     int Id,
@@ -80,4 +114,5 @@ public sealed record PatchPackageDto(
     DateTimeOffset? BaseCreatedAt,
     int SnapshotId,
     bool SnapshotIsLatest,
-    bool FileExists);
+    bool FileExists,
+    IReadOnlyList<string> Modules);

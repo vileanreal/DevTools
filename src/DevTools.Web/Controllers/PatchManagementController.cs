@@ -57,7 +57,7 @@ public sealed class PatchManagementController(IPatchManagementService service, I
 
     [HttpPost("systems/{systemId:int}/latest")]
     public Task<ActionResult<ApiResult<PatchSnapshotDto>>> SetCurrentAsLatest(int systemId, SetLatestRequest request, CancellationToken cancellationToken) =>
-        Run(() => service.SetCurrentAsLatestAsync(systemId, request.Label, Actor, cancellationToken));
+        Run(() => service.SetCurrentAsLatestAsync(systemId, request, Actor, cancellationToken));
 
     [HttpPost("snapshots/{id:int}/latest")]
     public Task<ActionResult<ApiResult<PatchSnapshotDto>>> SetSnapshotAsLatest(int id, CancellationToken cancellationToken) =>

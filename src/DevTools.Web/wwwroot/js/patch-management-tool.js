@@ -2,18 +2,26 @@
   const { byId, escapeHtml, notify, jsonRequest, appUrl } = window.devTools;
   const modal = id => bootstrap.Modal.getOrCreateInstance(byId(id));
   const systemModal = modal('patchSystemModal'), modulesModal = modal('patchModulesModal'), moduleModal = modal('patchModuleModal');
-  const compileModal = modal('patchCompileModal'), latestModal = modal('patchLatestModal');
+  const compileModal = modal('patchCompileModal'), latestModal = modal('patchLatestModal'), detailsModal = modal('patchDetailsModal');
   let systems = [], snapshots = [], packages = [], selectedSystemId = null, editingSystemId = null, editingModuleId = null, returnToManager = false;
-  let changes = null;
+  // changes: the last check of the module folders. selection: module ids ticked for the next patch / set-as-latest.
+  let changes = null, checking = false, selection = new Set(), selectionTouched = false, checkToken = 0;
+  const pages = { packages: { page:1, size:10 }, snapshots: { page:1, size:10 } };
 
   const selectedSystem = () => systems.find(item => item.id === selectedSystemId);
   const bytes = value => { const units = ['B','KB','MB','GB','TB']; let size = Number(value) || 0, unit = 0; while (size >= 1024 && unit < units.length - 1) { size /= 1024; unit++; } return `${size.toFixed(unit && size < 10 ? 1 : 0)} ${units[unit]}`; };
   const when = value => value ? new Date(value).toLocaleString() : '';
   const plural = (count, word) => `${Number(count).toLocaleString()} ${word}${count === 1 ? '' : 's'}`;
+  const listText = names => names.length <= 1 ? (names[0] || '') : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
   const setBusy = (button, busy, label) => {
     if (busy) { button.dataset.original = button.innerHTML; button.disabled = true; button.innerHTML = `<span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>${escapeHtml(label)}`; }
     else { button.disabled = false; if (button.dataset.original) button.innerHTML = button.dataset.original; }
   };
+  const summaryFor = moduleId => changes?.modules.find(item => item.moduleId === moduleId);
+  const pending = summary => summary ? summary.added + summary.changed + summary.deleted : 0;
+  const moduleChips = (names, highlight = []) => names.length
+    ? `<span class="patch-chips">${names.map(name => `<span class="patch-chip ${highlight.includes(name) ? 'latest' : ''}" title="${highlight.includes(name) ? `Latest version of ${escapeHtml(name)}` : ''}">${highlight.includes(name) ? '★ ' : ''}${escapeHtml(name)}</span>`).join('')}</span>`
+    : '<span class="text-muted">—</span>';
 
   // ---------- Systems (the open system is kept in ?system=<id>, so a reload reopens it) ----------
   const setSystemInUrl = systemId => {
@@ -31,12 +39,14 @@
   const renderSystems = () => {
     const host = byId('patch-system-list');
     if (!systems.length) { host.innerHTML = '<div class="empty-state">No systems yet. Add one, then add its module folders.</div>'; return; }
-    host.innerHTML = systems.map(system => `
-      <button class="system-row" type="button" data-system-id="${system.id}">
+    host.innerHTML = systems.map(system => {
+      const versioned = system.modules.filter(module => module.latestAt).length;
+      return `<button class="system-row" type="button" data-system-id="${system.id}">
         <span class="system-avatar">${escapeHtml(system.name.trim().charAt(0).toUpperCase() || 'P')}</span>
-        <span class="system-row-main"><strong>${escapeHtml(system.name)}</strong><small>${plural(system.modules.length, 'module')}${system.latestVersion ? ` · latest version ${when(system.latestVersion.createdAt)}` : ' · no latest version yet'}</small></span>
+        <span class="system-row-main"><strong>${escapeHtml(system.name)}</strong><small>${plural(system.modules.length, 'module')}${system.modules.length ? ` · ${versioned === system.modules.length ? 'all have a latest version' : `${versioned} of ${system.modules.length} with a latest version`}` : ''}</small></span>
         <span class="system-row-meta">${system.modules.map(module => escapeHtml(module.name)).join(', ')}</span><span class="row-arrow" aria-hidden="true">›</span>
-      </button>`).join('');
+      </button>`;
+    }).join('');
     host.querySelectorAll('[data-system-id]').forEach(button => button.addEventListener('click', () => showSystem(Number(button.dataset.systemId))));
   };
 
@@ -46,11 +56,13 @@
   };
 
   const showSystem = async systemId => {
-    selectedSystemId = systemId; changes = null; setSystemInUrl(systemId);
+    selectedSystemId = systemId; changes = null; selection = new Set(); selectionTouched = false;
+    pages.packages.page = 1; pages.snapshots.page = 1;
+    setSystemInUrl(systemId);
     byId('patch-systems-view').classList.add('d-none'); byId('patch-system-detail').classList.remove('d-none');
-    byId('patch-changes').classList.add('d-none');
+    byId('patch-compare-base').value = '';
     renderDetail();
-    await loadHistory();
+    await Promise.all([loadHistory(), checkChanges()]);
   };
 
   const renderDetail = () => {
@@ -58,13 +70,10 @@
     byId('patch-system-name').textContent = system.name;
     byId('patch-modules-count').textContent = system.modules.length;
     byId('patch-no-modules').classList.toggle('d-none', system.modules.length > 0);
-    const latest = system.latestVersion;
-    byId('patch-latest-title').textContent = latest ? (latest.label || 'Latest version') : 'Not set yet';
-    byId('patch-latest-meta').textContent = latest
-      ? `${when(latest.markedLatestAt || latest.createdAt)} · ${plural(latest.fileCount, 'file')} · ${bytes(latest.totalBytes)}${latest.createdBy ? ` · by ${latest.createdBy}` : ''}`
-      : 'Set the current files as the latest version once they match UAT/production. Until then, every file counts as ADDED.';
-    ['patch-view-changes', 'patch-compile', 'patch-set-latest'].forEach(id => byId(id).disabled = !system.modules.length);
-    renderModules();
+    byId('patch-changes').classList.toggle('d-none', !system.modules.length);
+    // Drop ticks of modules that were removed.
+    selection = new Set([...selection].filter(id => system.modules.some(module => module.id === id)));
+    renderModuleTable(); renderModules(); renderChanges();
   };
 
   const openSystemModal = system => {
@@ -93,7 +102,55 @@
     catch (error) { notify(error.message, true); }
   };
 
-  // ---------- Modules ----------
+  // ---------- Module table: selection, latest version and pending changes per module ----------
+  const renderModuleTable = () => {
+    const system = selectedSystem(), body = byId('patch-module-rows');
+    if (!system.modules.length) { body.innerHTML = '<tr><td colspan="6" class="patch-empty-cell">No modules yet.</td></tr>'; updateSelectionUi(); return; }
+    body.innerHTML = system.modules.map(module => {
+      const summary = summaryFor(module.id), count = pending(summary);
+      const cell = (value, kind) => checking && !summary ? '<span class="patch-muted">…</span>'
+        : summary ? (value ? `<strong class="patch-count ${kind}">${value.toLocaleString()}</strong>` : '<span class="patch-muted">0</span>') : '<span class="patch-muted">—</span>';
+      const base = summary && summary.baseSnapshotId !== module.latestSnapshotId && summary.baseCreatedAt
+        ? `<small class="patch-base-note" title="Compared with the snapshot chosen in “Compare with”">compared with ${escapeHtml(summary.baseLabel || 'snapshot')} · ${when(summary.baseCreatedAt)}</small>` : '';
+      return `<tr class="patch-module-row ${selection.has(module.id) ? 'selected' : ''} ${summary && !count ? 'up-to-date' : ''}" data-module-id="${module.id}">
+        <td class="patch-col-check"><input class="form-check-input patch-module-check" type="checkbox" ${selection.has(module.id) ? 'checked' : ''} aria-label="Include ${escapeHtml(module.name)}"></td>
+        <td><span class="patch-module-name"><strong>${escapeHtml(module.name)}</strong>${summary && !count ? '<span class="patch-tag ok">Up to date</span>' : ''}</span><code class="patch-path" title="${escapeHtml(module.sourcePath)}">${escapeHtml(module.sourcePath)}</code></td>
+        <td>${module.latestAt
+          ? `<span class="patch-version-cell"><strong title="${escapeHtml(module.latestLabel || '')}">${escapeHtml(module.latestLabel || 'Latest version')}</strong><small>${when(module.latestAt)}</small>${base}</span>`
+          : `<span class="patch-version-cell"><span class="patch-tag warn">Not set</span><small>Every file counts as added</small>${base}</span>`}</td>
+        <td class="patch-col-num">${cell(summary?.added, 'added')}</td>
+        <td class="patch-col-num">${cell(summary?.changed, 'changed')}</td>
+        <td class="patch-col-num">${cell(summary?.deleted, 'deleted')}</td>
+      </tr>`;
+    }).join('');
+    body.querySelectorAll('.patch-module-row').forEach(row => {
+      const id = Number(row.dataset.moduleId), box = row.querySelector('.patch-module-check');
+      box.addEventListener('change', () => setSelected(id, box.checked));
+      row.addEventListener('click', event => { if (event.target !== box) setSelected(id, !selection.has(id)); });
+    });
+    updateSelectionUi();
+  };
+
+  const setSelected = (id, on) => {
+    selectionTouched = true;
+    if (on) selection.add(id); else selection.delete(id);
+    renderModuleTable(); renderChanges();
+  };
+
+  const updateSelectionUi = () => {
+    const system = selectedSystem(); if (!system) return;
+    const all = byId('patch-select-all'), count = selection.size, total = system.modules.length;
+    all.checked = total > 0 && count === total; all.indeterminate = count > 0 && count < total; all.disabled = !total;
+    const selectedChanges = system.modules.filter(module => selection.has(module.id)).reduce((sum, module) => sum + pending(summaryFor(module.id)), 0);
+    const compile = byId('patch-compile'), latest = byId('patch-set-latest');
+    compile.disabled = !count || checking; latest.disabled = !count || checking; byId('patch-view-changes').disabled = !total || checking;
+    compile.textContent = count ? `Compile ${plural(count, 'module')}` : 'Compile patch';
+    byId('patch-modules-meta').textContent = !total ? 'Add the module folders to track.'
+      : count ? `${count} of ${total} selected${changes ? ` · ${plural(selectedChanges, 'pending change')}` : ''}`
+      : 'Each module has its own latest version. Tick the modules to include in a patch.';
+  };
+
+  // ---------- Manage modules dialog ----------
   const renderModules = () => {
     const system = selectedSystem(), host = byId('patch-module-list');
     host.innerHTML = system.modules.length ? system.modules.map(module => {
@@ -102,7 +159,7 @@
         <span class="deploy-module-icon" aria-hidden="true">▣</span>
         <span class="deploy-module-main"><strong>${escapeHtml(module.name)}</strong><code title="${escapeHtml(module.sourcePath)}">${escapeHtml(module.sourcePath)}</code>
           <span class="deploy-module-chips">${exclusions ? `<span class="deploy-chip muted" title="${escapeHtml(module.exclusions)}">${plural(exclusions, 'ignored pattern')}</span>` : '<span class="deploy-chip muted">No ignored files</span>'}</span></span>
-        <span class="deploy-row-actions"><button class="btn btn-sm btn-ghost module-edit" type="button">Edit</button><button class="icon-button module-delete" type="button" title="Remove module" aria-label="Remove ${escapeHtml(module.name)}">×</button></span>
+        <span class="deploy-row-actions"><button class="btn btn-sm btn-soft-primary module-edit" type="button">Edit</button><button class="icon-button btn-soft-danger module-delete" type="button" title="Remove module" aria-label="Remove ${escapeHtml(module.name)}">×</button></span>
       </article>`;
     }).join('') : '<div class="empty-state compact">No modules yet.</div>';
     host.querySelectorAll('.module-edit').forEach(button => button.addEventListener('click', () => openModuleModal(Number(button.closest('[data-module-id]').dataset.moduleId))));
@@ -128,14 +185,80 @@
     try {
       await jsonRequest(editingModuleId ? `/api/patch-management/systems/${selectedSystemId}/modules/${editingModuleId}` : `/api/patch-management/systems/${selectedSystemId}/modules`, editingModuleId ? 'PUT' : 'POST', body);
       moduleModal.hide(); await loadSystems(); notify(editingModuleId ? 'Module updated.' : 'Module added.');
+      checkChanges();
     } catch (error) { notify(error.message, true); }
   };
 
   const deleteModule = async moduleId => {
     const module = selectedSystem()?.modules.find(item => item.id === moduleId);
-    if (!module || !confirm(`Remove module ${module.name}? Its folder is not touched; existing snapshots keep its files.`)) return;
-    try { await jsonRequest(`/api/patch-management/modules/${moduleId}`, 'DELETE'); await loadSystems(); notify('Module removed.'); }
+    if (!module || !confirm(`Remove module ${module.name}? Its folder is not touched; existing snapshots and patches keep its files.`)) return;
+    try { await jsonRequest(`/api/patch-management/modules/${moduleId}`, 'DELETE'); await loadSystems(); notify('Module removed.'); checkChanges(); }
     catch (error) { notify(error.message, true); }
+  };
+
+  // ---------- Pending changes ----------
+  const checkChanges = async () => {
+    const system = selectedSystem();
+    if (!system?.modules.length) { changes = null; renderDetail(); return; }
+    const token = ++checkToken, base = byId('patch-compare-base').value;
+    checking = true; renderModuleTable(); renderChanges();
+    const button = byId('patch-view-changes'); setBusy(button, true, 'Checking');
+    try {
+      const result = await jsonRequest(`/api/patch-management/systems/${selectedSystemId}/changes${base ? `?baseSnapshotId=${base}` : ''}`);
+      if (token !== checkToken) return;
+      changes = result;
+      // Until the user picks modules themselves, tick the ones that have changes.
+      if (!selectionTouched) selection = new Set(result.modules.filter(item => pending(item) > 0).map(item => item.moduleId));
+    } catch (error) { if (token === checkToken) { changes = null; notify(error.message, true); } }
+    finally {
+      if (token === checkToken) { checking = false; setBusy(button, false); renderModuleTable(); renderChanges(); }
+    }
+  };
+
+  const renderChanges = () => {
+    const system = selectedSystem(); if (!system) return;
+    const host = byId('patch-changes-body');
+    if (checking) { host.innerHTML = '<div class="empty-state compact"><span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>Checking the module folders…</div>'; byId('patch-changes-meta').textContent = ''; return; }
+    if (!changes) { host.innerHTML = '<div class="empty-state compact">Press “Check changes” to compare the module folders with their latest version.</div>'; byId('patch-changes-meta').textContent = ''; return; }
+    byId('patch-changes-meta').textContent = `Checked ${when(changes.comparedAt)}`;
+    if (!selection.size) { host.innerHTML = '<div class="empty-state compact">Tick one or more modules above to see the changes that would go into the patch.</div>'; return; }
+    const names = new Set(system.modules.filter(module => selection.has(module.id)).map(module => module.name));
+    const modules = changes.modules.filter(item => names.has(item.module));
+    const files = changes.files.filter(file => names.has(file.module));
+    byId('patch-changes-title').textContent = `Pending changes · ${plural(modules.length, 'module')}`;
+    mountChanges(host, { ...changes, modules, files,
+      added: modules.reduce((sum, item) => sum + item.added, 0), changed: modules.reduce((sum, item) => sum + item.changed, 0), deleted: modules.reduce((sum, item) => sum + item.deleted, 0) });
+  };
+
+  // Renders a change list as a table grouped by module, with filter chips that only affect this host.
+  const kindLabels = { ADDED:'Added', CHANGED:'Changed', DELETED:'Deleted' };
+  const sizeText = file => file.kind === 'DELETED' ? bytes(file.previousSize) : file.kind === 'CHANGED' ? `${bytes(file.previousSize)} → ${bytes(file.size)}` : bytes(file.size);
+  const mountChanges = (host, result, { showBase = true } = {}) => {
+    let filter = '';
+    const draw = () => {
+      const total = result.added + result.changed + result.deleted;
+      if (!total) { host.innerHTML = '<div class="empty-state compact">No changes — the files match their version.</div>'; return; }
+      const groups = result.modules.filter(item => pending(item) > 0).map(item => ({ item, files: result.files.filter(file => file.module === item.module && (!filter || file.kind === filter)) })).filter(group => group.files.length);
+      host.innerHTML = `
+        <div class="patch-change-summary">
+          ${[['', 'All', total], ['ADDED', 'Added', result.added], ['CHANGED', 'Changed', result.changed], ['DELETED', 'Deleted', result.deleted]].map(([kind, label, count]) =>
+            `<button type="button" class="patch-change-chip kind-${(kind || 'all').toLowerCase()} ${filter === kind ? 'active' : ''}" data-kind="${kind}" ${count || !kind ? '' : 'disabled'}><strong>${count.toLocaleString()}</strong>${label}</button>`).join('')}
+        </div>
+        <div class="patch-table-wrap patch-changes-wrap">
+          <table class="patch-table patch-changes-table">
+            <thead><tr><th class="patch-col-kind">Type</th><th>File</th><th class="patch-col-size">Size</th></tr></thead>
+            ${groups.map(({ item, files }) => `<tbody>
+              <tr class="patch-group-row"><th colspan="3"><span class="patch-group-head"><strong>${escapeHtml(item.module)}</strong>
+                <span class="patch-module-counts">${item.added ? `<span class="patch-count added">+${item.added}</span>` : ''}${item.changed ? `<span class="patch-count changed">~${item.changed}</span>` : ''}${item.deleted ? `<span class="patch-count deleted">−${item.deleted}</span>` : ''}</span>
+                ${showBase ? `<small>${item.baseCreatedAt ? `since ${escapeHtml(item.baseLabel || 'snapshot')} · ${when(item.baseCreatedAt)}` : 'no earlier version — all files are new'}</small>` : ''}</span></th></tr>
+              ${files.map(file => `<tr class="patch-change-row kind-${file.kind.toLowerCase()}"><td class="patch-col-kind"><span class="deploy-file-tag patch-kind-${file.kind.toLowerCase()}">${kindLabels[file.kind]}</span></td><td><code title="${escapeHtml(file.path)}">${escapeHtml(file.path)}</code></td><td class="patch-col-size">${sizeText(file)}</td></tr>`).join('')}
+            </tbody>`).join('')}
+          </table>
+        </div>
+        ${result.truncated ? `<p class="deploy-preview-note">Showing the first ${result.files.length.toLocaleString()} changes.</p>` : ''}`;
+      host.querySelectorAll('[data-kind]').forEach(button => button.addEventListener('click', () => { filter = button.dataset.kind; draw(); }));
+    };
+    draw();
   };
 
   // ---------- Snapshots and patches ----------
@@ -152,30 +275,51 @@
 
   const renderCompareOptions = () => {
     const select = byId('patch-compare-base'), previous = select.value;
-    const latest = snapshots.find(item => item.isLatest);
-    select.innerHTML = `<option value="">${latest ? 'Latest version' : 'Nothing (all files are new)'}</option>`
-      + snapshots.filter(item => !item.isLatest).map(item => `<option value="${item.id}">${escapeHtml(snapshotName(item))}</option>`).join('');
+    select.innerHTML = '<option value="">Each module’s latest version</option>'
+      + snapshots.map(item => `<option value="${item.id}">${escapeHtml(snapshotName(item))} (${escapeHtml(item.modules.join(', '))})</option>`).join('');
     if ([...select.options].some(option => option.value === previous)) select.value = previous;
   };
 
+  // Shared pager under a table: page numbers, range and rows per page.
+  const renderPager = (pager, total, state, rerender) => {
+    const pageCount = Math.max(1, Math.ceil(total / state.size));
+    state.page = Math.min(Math.max(1, state.page), pageCount);
+    pager.classList.toggle('d-none', total <= 10);
+    if (total <= 10) return;
+    const start = (state.page - 1) * state.size, numbers = [];
+    for (let page = 1; page <= pageCount; page++)
+      if (page === 1 || page === pageCount || Math.abs(page - state.page) <= 1) numbers.push(page);
+      else if (numbers[numbers.length - 1] !== '…') numbers.push('…');
+    pager.innerHTML = `<span class="deploy-pager-info">${(start + 1).toLocaleString()}–${Math.min(start + state.size, total).toLocaleString()} of ${total.toLocaleString()}</span>
+      <span class="deploy-pager-pages">
+        <button class="btn btn-sm btn-ghost" type="button" data-page="${state.page - 1}" ${state.page === 1 ? 'disabled' : ''} aria-label="Previous page">‹</button>
+        ${numbers.map(page => page === '…' ? '<span class="deploy-pager-gap">…</span>' : `<button class="btn btn-sm ${page === state.page ? 'btn-primary' : 'btn-ghost'}" type="button" data-page="${page}" ${page === state.page ? 'aria-current="page"' : ''}>${page}</button>`).join('')}
+        <button class="btn btn-sm btn-ghost" type="button" data-page="${state.page + 1}" ${state.page === pageCount ? 'disabled' : ''} aria-label="Next page">›</button>
+      </span>
+      <label class="deploy-pager-size">Rows <select class="form-select form-select-sm">${[10, 25, 50].map(size => `<option ${size === state.size ? 'selected' : ''}>${size}</option>`).join('')}</select></label>`;
+    pager.querySelectorAll('[data-page]').forEach(button => button.addEventListener('click', () => { state.page = Number(button.dataset.page); rerender(); }));
+    pager.querySelector('select').addEventListener('change', event => { state.size = Number(event.target.value); state.page = 1; rerender(); });
+  };
+  const pageOf = (items, state) => items.slice((state.page - 1) * state.size, state.page * state.size);
+
   const snapshotActions = item => `
-    ${item.isLatest ? '' : `<button class="btn btn-sm deploy-btn-modules snapshot-latest" type="button" data-snapshot-id="${item.id}">Set as latest</button>`}
-    ${item.isLatest || item.patchId ? '' : `<button class="icon-button snapshot-delete" type="button" data-snapshot-id="${item.id}" title="Delete snapshot" aria-label="Delete snapshot">×</button>`}`;
+    ${item.isLatest && item.latestFor.length === item.modules.length ? '' : `<button class="btn btn-sm btn-soft-success snapshot-latest" type="button" data-snapshot-id="${item.id}" title="Make this the latest version of ${escapeHtml(item.modules.join(', '))}">Set as latest</button>`}
+    ${item.isLatest || item.patchId ? '' : `<button class="icon-button btn-soft-danger snapshot-delete" type="button" data-snapshot-id="${item.id}" title="Delete snapshot" aria-label="Delete snapshot">×</button>`}`;
   const wireSnapshotActions = host => {
     host.querySelectorAll('.snapshot-latest').forEach(button => button.addEventListener('click', event => { event.stopPropagation(); detailsModal.hide(); setSnapshotLatest(Number(button.dataset.snapshotId)); }));
     host.querySelectorAll('.snapshot-delete').forEach(button => button.addEventListener('click', event => { event.stopPropagation(); detailsModal.hide(); deleteSnapshot(Number(button.dataset.snapshotId)); }));
   };
 
   const packageActions = item => `
-    ${item.fileExists ? `<a class="btn btn-sm btn-primary" href="${appUrl(`/api/patch-management/packages/${item.id}/download`)}" download>Download</a>` : '<span class="deploy-chip muted">File missing</span>'}
-    ${item.snapshotIsLatest ? '' : `<button class="btn btn-sm deploy-btn-modules package-latest" type="button" data-package-id="${item.id}" title="Mark what this patch contains as the version now on UAT/production">Set as latest</button>`}
-    <button class="icon-button package-delete" type="button" data-package-id="${item.id}" title="Delete patch" aria-label="Delete ${escapeHtml(item.fileName)}">×</button>`;
+    ${item.fileExists ? `<a class="btn btn-sm btn-soft-primary" href="${appUrl(`/api/patch-management/packages/${item.id}/download`)}" download title="Download ${escapeHtml(item.fileName)}">↓ Download</a>` : '<span class="deploy-chip muted">File missing</span>'}
+    ${item.snapshotIsLatest ? '' : `<button class="btn btn-sm btn-soft-success package-latest" type="button" data-package-id="${item.id}" title="Mark what this patch contains as the version now on UAT/production">Set as latest</button>`}
+    <button class="icon-button btn-soft-danger package-delete" type="button" data-package-id="${item.id}" title="Delete patch" aria-label="Delete ${escapeHtml(item.fileName)}">×</button>`;
   const wirePackageActions = host => {
     host.querySelectorAll('a[download]').forEach(link => link.addEventListener('click', event => event.stopPropagation()));
     host.querySelectorAll('.package-latest').forEach(button => button.addEventListener('click', event => {
       event.stopPropagation(); detailsModal.hide();
       const item = packages.find(candidate => candidate.id === Number(button.dataset.packageId));
-      setSnapshotLatest(item.snapshotId, `Set the contents of ${item.fileName} as the latest version (the version now on UAT/production)?`);
+      setSnapshotLatest(item.snapshotId, item.fileName);
     }));
     host.querySelectorAll('.package-delete').forEach(button => button.addEventListener('click', event => {
       event.stopPropagation(); detailsModal.hide(); deletePackage(packages.find(candidate => candidate.id === Number(button.dataset.packageId)));
@@ -188,47 +332,51 @@
     row.addEventListener('keydown', event => { if ((event.key === 'Enter' || event.key === ' ') && event.target === row) { event.preventDefault(); open(Number(row.dataset.rowId)); } });
   });
 
-  const renderSnapshots = () => {
-    const host = byId('patch-snapshot-list');
-    if (!snapshots.length) { host.innerHTML = '<div class="empty-state">No snapshots yet. Use “Set current as latest” or compile a patch.</div>'; return; }
-    host.innerHTML = snapshots.map(item => `<article class="deploy-package-row compact" data-row-id="${item.id}" tabindex="0" role="button" aria-label="View snapshot details">
-        <span class="deploy-package-icon" aria-hidden="true">${item.source === 'patch' ? 'Δ' : '◉'}</span>
-        <span class="deploy-package-main">
-          <span class="deploy-package-line">
-            <strong>${escapeHtml(item.label || (item.source === 'patch' ? 'Patch snapshot' : 'Snapshot'))}</strong>
-            ${item.isLatest ? '<span class="deploy-status deploy-status-deployed">Latest version</span>' : ''}
-            <span class="deploy-status ${item.source === 'patch' ? 'deploy-status-uploaded' : 'patch-status-snapshot'}">${item.source === 'patch' ? 'From patch' : 'Set as latest'}</span>
-          </span>
-          <small class="deploy-package-meta">${when(item.createdAt)} · ${plural(item.fileCount, 'file')} · ${bytes(item.totalBytes)}${item.createdBy ? ` · by ${escapeHtml(item.createdBy)}` : ''}</small>
-        </span>
-        <span class="deploy-row-actions">${snapshotActions(item)}</span>
-      </article>`).join('');
-    wireSnapshotActions(host);
-    makeRowsClickable(host, openSnapshotDetails);
-  };
-
   const renderPackages = () => {
-    const host = byId('patch-package-list');
-    if (!packages.length) { host.innerHTML = '<div class="empty-state">No patches compiled yet.</div>'; return; }
-    host.innerHTML = packages.map(item => `<article class="deploy-package-row compact" data-row-id="${item.id}" tabindex="0" role="button" aria-label="View ${escapeHtml(item.fileName)} details">
-        <span class="deploy-package-icon" aria-hidden="true">${item.format === '7z' ? '7z' : 'zip'}</span>
-        <span class="deploy-package-main">
-          <span class="deploy-package-line">
-            <strong title="${escapeHtml(item.fileName)}">${escapeHtml(item.fileName)}</strong>
-            ${item.snapshotIsLatest ? '<span class="deploy-status deploy-status-deployed">Latest version</span>' : ''}
-            ${item.label ? `<span class="deploy-package-description" title="${escapeHtml(item.label)}">${escapeHtml(item.label)}</span>` : ''}
-          </span>
-          <small class="deploy-package-meta"><span class="patch-count added">${item.added} added</span> · <span class="patch-count changed">${item.changed} changed</span> · <span class="patch-count deleted">${item.deleted} deleted</span> · ${bytes(item.sizeBytes)} · ${when(item.createdAt)}${item.createdBy ? ` · by ${escapeHtml(item.createdBy)}` : ''} · compared with ${item.baseCreatedAt ? when(item.baseCreatedAt) : 'nothing'}</small>
-        </span>
-        <span class="deploy-row-actions">${packageActions(item)}</span>
-      </article>`).join('');
+    const host = byId('patch-package-list'), pager = byId('patch-package-pager');
+    if (!packages.length) { host.innerHTML = '<div class="empty-state compact">No patches compiled yet. Tick modules above and press Compile.</div>'; pager.classList.add('d-none'); return; }
+    renderPager(pager, packages.length, pages.packages, renderPackages);
+    host.innerHTML = `<div class="patch-table-wrap"><table class="patch-table patch-list-table">
+      <thead><tr><th>Patch</th><th>Modules</th><th class="patch-col-changes">Changes</th><th class="patch-col-size">Size</th><th class="patch-col-date">Compiled</th><th class="patch-col-actions"><span class="visually-hidden">Actions</span></th></tr></thead>
+      <tbody>${pageOf(packages, pages.packages).map(item => `<tr class="patch-click-row" data-row-id="${item.id}" tabindex="0" aria-label="View ${escapeHtml(item.fileName)} details">
+        <td><span class="patch-title-cell"><span class="patch-title-line"><span class="patch-format">${item.format}</span><strong title="${escapeHtml(item.fileName)}">${escapeHtml(item.fileName)}</strong>${item.snapshotIsLatest ? '<span class="patch-tag ok">Latest</span>' : ''}</span>${item.label ? `<small title="${escapeHtml(item.label)}">${escapeHtml(item.label)}</small>` : ''}</span></td>
+        <td>${moduleChips(item.modules)}</td>
+        <td class="patch-col-changes"><span class="patch-module-counts"><span class="patch-count added">+${item.added}</span><span class="patch-count changed">~${item.changed}</span><span class="patch-count deleted">−${item.deleted}</span></span></td>
+        <td class="patch-col-size">${bytes(item.sizeBytes)}</td>
+        <td class="patch-col-date"><span class="patch-date">${when(item.createdAt)}${item.createdBy ? `<small>by ${escapeHtml(item.createdBy)}</small>` : ''}</span></td>
+        <td class="patch-col-actions"><span class="deploy-row-actions">${packageActions(item)}</span></td>
+      </tr>`).join('')}</tbody></table></div>`;
     wirePackageActions(host);
     makeRowsClickable(host, openPackageDetails);
   };
 
-  const setSnapshotLatest = async (snapshotId, question = 'Set this snapshot as the latest version? Changes will be measured from it.') => {
-    if (!confirm(question)) return;
-    try { await jsonRequest(`/api/patch-management/snapshots/${snapshotId}/latest`, 'POST'); await Promise.all([loadSystems(), loadHistory()]); changes = null; byId('patch-changes').classList.add('d-none'); notify('Latest version updated.'); }
+  const renderSnapshots = () => {
+    const host = byId('patch-snapshot-list'), pager = byId('patch-snapshot-pager');
+    if (!snapshots.length) { host.innerHTML = '<div class="empty-state compact">No snapshots yet. Use “Set as latest” or compile a patch.</div>'; pager.classList.add('d-none'); return; }
+    renderPager(pager, snapshots.length, pages.snapshots, renderSnapshots);
+    host.innerHTML = `<div class="patch-table-wrap"><table class="patch-table patch-list-table">
+      <thead><tr><th>Snapshot</th><th>Modules <small class="patch-muted">(★ latest version)</small></th><th class="patch-col-num">Files</th><th class="patch-col-size">Size</th><th class="patch-col-date">Taken</th><th class="patch-col-actions"><span class="visually-hidden">Actions</span></th></tr></thead>
+      <tbody>${pageOf(snapshots, pages.snapshots).map(item => `<tr class="patch-click-row" data-row-id="${item.id}" tabindex="0" aria-label="View snapshot details">
+        <td><span class="patch-title-cell"><span class="patch-title-line"><span class="patch-tag ${item.source === 'patch' ? 'info' : 'muted'}">${item.source === 'patch' ? 'Patch' : 'Snapshot'}</span><strong>${escapeHtml(item.label || (item.source === 'patch' ? 'Patch snapshot' : 'Snapshot'))}</strong></span></span></td>
+        <td>${moduleChips(item.modules, item.latestFor)}</td>
+        <td class="patch-col-num">${item.fileCount.toLocaleString()}</td>
+        <td class="patch-col-size">${bytes(item.totalBytes)}</td>
+        <td class="patch-col-date"><span class="patch-date">${when(item.createdAt)}${item.createdBy ? `<small>by ${escapeHtml(item.createdBy)}</small>` : ''}</span></td>
+        <td class="patch-col-actions"><span class="deploy-row-actions">${snapshotActions(item)}</span></td>
+      </tr>`).join('')}</tbody></table></div>`;
+    wireSnapshotActions(host);
+    makeRowsClickable(host, openSnapshotDetails);
+  };
+
+  // After a version moves, tick whichever modules still have changes again.
+  const refreshAfterVersionChange = async () => { selectionTouched = false; await Promise.all([loadSystems(), loadHistory()]); await checkChanges(); };
+
+  const setSnapshotLatest = async (snapshotId, fileName) => {
+    const snapshot = snapshots.find(item => item.id === snapshotId);
+    const names = snapshot?.modules ?? [];
+    const what = fileName ? `the contents of ${fileName}` : 'this snapshot';
+    if (!confirm(`Make ${what} the latest version of ${listText(names) || 'its modules'}? Their changes will be measured from it; other modules keep their own version.`)) return;
+    try { await jsonRequest(`/api/patch-management/snapshots/${snapshotId}/latest`, 'POST'); notify(`Latest version updated for ${listText(names)}.`); await refreshAfterVersionChange(); }
     catch (error) { notify(error.message, true); }
   };
 
@@ -244,53 +392,7 @@
     catch (error) { notify(error.message, true); }
   };
 
-  // ---------- Changes (grouped by module) ----------
-  const kindLabels = { ADDED:'Added', CHANGED:'Changed', DELETED:'Deleted' };
-  const sizeText = file => file.kind === 'DELETED' ? bytes(file.previousSize) : file.kind === 'CHANGED' ? `${bytes(file.previousSize)} → ${bytes(file.size)}` : bytes(file.size);
-
-  // Renders a change list into host, grouped by module, with filter chips that only affect this host.
-  const mountChanges = (host, result) => {
-    let filter = '';
-    const draw = () => {
-      const total = result.added + result.changed + result.deleted;
-      if (!total) { host.innerHTML = '<div class="empty-state compact">No changes — the files match.</div>'; return; }
-      const modules = result.modules.filter(module => module.added + module.changed + module.deleted > 0);
-      host.innerHTML = `
-        <div class="patch-change-summary">
-          ${[['', 'All', total], ['ADDED', 'Added', result.added], ['CHANGED', 'Changed', result.changed], ['DELETED', 'Deleted', result.deleted]].map(([kind, label, count]) =>
-            `<button type="button" class="patch-change-chip kind-${(kind || 'all').toLowerCase()} ${filter === kind ? 'active' : ''}" data-kind="${kind}"><strong>${count.toLocaleString()}</strong>${label}</button>`).join('')}
-        </div>
-        ${modules.map(module => {
-          const files = result.files.filter(file => file.module === module.module && (!filter || file.kind === filter));
-          if (!files.length) return '';
-          return `<section class="patch-module-group">
-            <header><strong>${escapeHtml(module.module)}</strong>
-              <span class="patch-module-counts">${module.added ? `<span class="patch-count added">${module.added} added</span>` : ''}${module.changed ? `<span class="patch-count changed">${module.changed} changed</span>` : ''}${module.deleted ? `<span class="patch-count deleted">${module.deleted} deleted</span>` : ''}</span></header>
-            <ul class="deploy-file-list patch-file-list">${files.map(file => `<li><span class="deploy-file-tag patch-kind-${file.kind.toLowerCase()}">${kindLabels[file.kind]}</span><code title="${escapeHtml(file.path)}">${escapeHtml(file.path)}</code><small>${sizeText(file)}</small></li>`).join('')}</ul>
-          </section>`;
-        }).join('')}
-        ${result.truncated ? `<p class="deploy-preview-note">Showing the first ${result.files.length.toLocaleString()} changes.</p>` : ''}`;
-      host.querySelectorAll('[data-kind]').forEach(button => button.addEventListener('click', () => { filter = button.dataset.kind; draw(); }));
-    };
-    draw();
-  };
-
-  const viewChanges = async () => {
-    const button = byId('patch-view-changes'); setBusy(button, true, 'Checking files');
-    const base = byId('patch-compare-base').value;
-    try {
-      changes = await jsonRequest(`/api/patch-management/systems/${selectedSystemId}/changes${base ? `?baseSnapshotId=${base}` : ''}`);
-      const card = byId('patch-changes'); card.classList.remove('d-none');
-      byId('patch-changes-title').textContent = 'Changes since ' + (changes.baseCreatedAt ? (changes.baseLabel || 'the selected version') : 'nothing (all files are new)');
-      byId('patch-changes-meta').textContent = `Checked ${when(changes.comparedAt)}${changes.baseCreatedAt ? ` · compared with ${when(changes.baseCreatedAt)}` : ''}`;
-      mountChanges(byId('patch-changes-body'), changes);
-      card.scrollIntoView({ behavior:'smooth', block:'nearest' });
-    } catch (error) { notify(error.message, true); }
-    finally { setBusy(button, false); }
-  };
-
   // ---------- Details for a patch or a snapshot ----------
-  const detailsModal = modal('patchDetailsModal');
   let detailsToken = 0;
   const showDetails = async ({ title, subtitle, facts, changesTitle, changesUrl, actions, wire }) => {
     const token = ++detailsToken;
@@ -312,10 +414,10 @@
   const openPackageDetails = id => {
     const item = packages.find(candidate => candidate.id === id); if (!item) return;
     showDetails({
-      title: `${escapeHtml(item.fileName)}${item.snapshotIsLatest ? ' <span class="deploy-status deploy-status-deployed">Latest version</span>' : ''}`,
+      title: `${escapeHtml(item.fileName)}${item.snapshotIsLatest ? ' <span class="patch-tag ok">Latest version</span>' : ''}`,
       subtitle: item.label || 'No description',
-      facts: [['Format', `.${item.format}`], ['Size', bytes(item.sizeBytes)], ['Compiled', when(item.createdAt)], ['By', item.createdBy],
-        ['Compared with', item.baseCreatedAt ? when(item.baseCreatedAt) : 'Nothing (all files new)'], ['Added', item.added], ['Changed', item.changed], ['Deleted', item.deleted]],
+      facts: [['Modules', item.modules.join(', ')], ['Format', `.${item.format}`], ['Size', bytes(item.sizeBytes)], ['Compiled', when(item.createdAt)], ['By', item.createdBy],
+        ['Added', item.added], ['Changed', item.changed], ['Deleted', item.deleted]],
       changesTitle: 'Files in this patch',
       changesUrl: `/api/patch-management/packages/${item.id}/changes`,
       actions: packageActions(item),
@@ -326,46 +428,88 @@
   const openSnapshotDetails = id => {
     const item = snapshots.find(candidate => candidate.id === id); if (!item) return;
     showDetails({
-      title: `${escapeHtml(item.label || 'Snapshot')}${item.isLatest ? ' <span class="deploy-status deploy-status-deployed">Latest version</span>' : ''}`,
-      subtitle: item.source === 'patch' ? 'Recorded when a patch was compiled' : 'Recorded by “Set current as latest”',
-      facts: [['Taken', when(item.createdAt)], ['By', item.createdBy], ['Files', item.fileCount.toLocaleString()], ['Total size', bytes(item.totalBytes)],
-        ['Set as latest', item.markedLatestAt ? when(item.markedLatestAt) : null]],
-      changesTitle: 'Changes compared with the snapshot before it',
+      title: `${escapeHtml(item.label || 'Snapshot')}${item.isLatest ? ' <span class="patch-tag ok">Latest version</span>' : ''}`,
+      subtitle: item.source === 'patch' ? 'Recorded when a patch was compiled' : 'Recorded by “Set as latest”',
+      facts: [['Modules', item.modules.join(', ')], ['Latest version of', item.latestFor.join(', ') || 'none'], ['Taken', when(item.createdAt)], ['By', item.createdBy],
+        ['Files', item.fileCount.toLocaleString()], ['Total size', bytes(item.totalBytes)]],
+      changesTitle: 'Changes compared with each module’s previous snapshot',
       changesUrl: `/api/patch-management/snapshots/${item.id}/changes`,
       actions: snapshotActions(item),
       wire: wireSnapshotActions
     });
   };
 
-  // ---------- Compile and set latest ----------
-  const openCompile = () => {
+  // ---------- Compile and set latest (both act on the ticked modules) ----------
+  const renderCheckList = (hostId, ids, { onlyChanged = false } = {}) => {
+    const system = selectedSystem(), host = byId(hostId);
+    host.innerHTML = system.modules.map(module => {
+      const summary = summaryFor(module.id), count = pending(summary);
+      return `<label class="patch-check-item ${summary && !count ? 'up-to-date' : ''}">
+        <input class="form-check-input" type="checkbox" value="${module.id}" ${ids.has(module.id) ? 'checked' : ''}>
+        <strong>${escapeHtml(module.name)}</strong>
+        <span class="patch-module-counts">${summary ? (count ? `${summary.added ? `<span class="patch-count added">+${summary.added}</span>` : ''}${summary.changed ? `<span class="patch-count changed">~${summary.changed}</span>` : ''}${summary.deleted ? `<span class="patch-count deleted">−${summary.deleted}</span>` : ''}` : '<span class="patch-muted">no changes</span>') : ''}</span>
+        <small>${module.latestAt ? `since ${escapeHtml(module.latestLabel || 'latest version')}` : 'no version yet'}</small>
+      </label>`;
+    }).join('');
+    host.dataset.onlyChanged = onlyChanged ? '1' : '';
+  };
+  const checkedIn = hostId => [...byId(hostId).querySelectorAll('input:checked')].map(input => Number(input.value));
+
+  const updateCompileSummary = () => {
+    const ids = checkedIn('patch-compile-modules'), system = selectedSystem();
+    const total = system.modules.filter(module => ids.includes(module.id)).reduce((sum, module) => sum + pending(summaryFor(module.id)), 0);
     const base = byId('patch-compare-base');
-    byId('patch-compile-subtitle').textContent = `Changes since: ${base.options[base.selectedIndex]?.text || 'latest version'}`;
+    byId('patch-compile-subtitle').textContent = `${plural(ids.length, 'module')} · ${plural(total, 'change')} · compared with ${base.value ? base.options[base.selectedIndex].text : 'each module’s latest version'}`;
+    const submit = byId('patch-compile-submit');
+    submit.disabled = !ids.length;
+    submit.textContent = byId('patch-compile-latest').checked ? 'Compile and set as latest' : 'Compile';
+  };
+
+  const openCompile = () => {
+    renderCheckList('patch-compile-modules', selection);
     byId('patch-compile-label').value = '';
+    byId('patch-compile-latest').checked = false;
+    updateCompileSummary();
     compileModal.show();
   };
 
   const compile = async event => {
     event.preventDefault();
+    const moduleIds = checkedIn('patch-compile-modules');
+    if (!moduleIds.length) { notify('Choose at least one module.', true); return; }
+    const setAsLatest = byId('patch-compile-latest').checked;
     const button = byId('patch-compile-submit'); setBusy(button, true, 'Compiling');
     const base = byId('patch-compare-base').value;
     try {
       const result = await jsonRequest(`/api/patch-management/systems/${selectedSystemId}/compile`, 'POST', {
-        format:document.querySelector('input[name="patch-format"]:checked').value, baseSnapshotId:base ? Number(base) : null, label:byId('patch-compile-label').value || null
+        format:document.querySelector('input[name="patch-format"]:checked').value, baseSnapshotId:base ? Number(base) : null,
+        label:byId('patch-compile-label').value || null, moduleIds, setAsLatest
       });
-      compileModal.hide(); await loadHistory();
-      notify(`${result.fileName} compiled: ${result.added} added, ${result.changed} changed, ${result.deleted} deleted.`);
+      compileModal.hide();
+      notify(`${result.fileName} compiled: ${result.added} added, ${result.changed} changed, ${result.deleted} deleted${setAsLatest ? ' — now the latest version' : ''}.`);
+      selection = new Set(moduleIds); selectionTouched = true;
+      if (setAsLatest) await refreshAfterVersionChange(); else await loadHistory();
     } catch (error) { notify(error.message, true); }
-    finally { setBusy(button, false); }
+    finally { setBusy(button, false); updateCompileSummary(); }
+  };
+
+  const openSetLatest = () => {
+    renderCheckList('patch-latest-modules', selection);
+    byId('patch-latest-label').value = '';
+    latestModal.show();
   };
 
   const setCurrentLatest = async event => {
     event.preventDefault();
+    const moduleIds = checkedIn('patch-latest-modules');
+    if (!moduleIds.length) { notify('Choose at least one module.', true); return; }
     const button = byId('patch-latest-submit'); setBusy(button, true, 'Taking snapshot');
     try {
-      await jsonRequest(`/api/patch-management/systems/${selectedSystemId}/latest`, 'POST', { label:byId('patch-latest-label').value || null });
-      latestModal.hide(); changes = null; byId('patch-changes').classList.add('d-none');
-      await Promise.all([loadSystems(), loadHistory()]); notify('The current files are now the latest version.');
+      await jsonRequest(`/api/patch-management/systems/${selectedSystemId}/latest`, 'POST', { label:byId('patch-latest-label').value || null, moduleIds });
+      latestModal.hide();
+      const names = selectedSystem().modules.filter(module => moduleIds.includes(module.id)).map(module => module.name);
+      notify(`The current files of ${listText(names)} are now the latest version.`);
+      await refreshAfterVersionChange();
     } catch (error) { notify(error.message, true); }
     finally { setBusy(button, false); }
   };
@@ -381,10 +525,22 @@
   byId('patch-module-add').addEventListener('click', () => openModuleModal(null));
   byId('patch-module-form').addEventListener('submit', saveModule);
   byId('patchModuleModal').addEventListener('hidden.bs.modal', () => { if (returnToManager) { returnToManager = false; modulesModal.show(); } });
-  byId('patch-view-changes').addEventListener('click', viewChanges);
+  byId('patch-select-all').addEventListener('change', event => {
+    selectionTouched = true;
+    selection = event.target.checked ? new Set(selectedSystem().modules.map(module => module.id)) : new Set();
+    renderModuleTable(); renderChanges();
+  });
+  byId('patch-compare-base').addEventListener('change', checkChanges);
+  byId('patch-view-changes').addEventListener('click', checkChanges);
   byId('patch-compile').addEventListener('click', openCompile);
+  byId('patch-compile-modules').addEventListener('change', updateCompileSummary);
+  byId('patch-compile-latest').addEventListener('change', updateCompileSummary);
+  byId('patch-compile-all').addEventListener('click', () => {
+    byId('patch-compile-modules').querySelectorAll('input').forEach(input => { input.checked = pending(summaryFor(Number(input.value))) > 0; });
+    updateCompileSummary();
+  });
   byId('patch-compile-form').addEventListener('submit', compile);
-  byId('patch-set-latest').addEventListener('click', () => { byId('patch-latest-label').value = ''; latestModal.show(); });
+  byId('patch-set-latest').addEventListener('click', openSetLatest);
   byId('patch-latest-form').addEventListener('submit', setCurrentLatest);
   loadSystems()
     .then(() => {

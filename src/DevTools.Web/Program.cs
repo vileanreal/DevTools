@@ -26,10 +26,15 @@ var logIndexDatabasePath = ResolveDatabasePath(
     builder.Configuration["DatabasePaths:LogIndexDatabase"],
     "devtools-log-index.db",
     builder.Environment.ContentRootPath);
+// The configuration database sees parallel reads while large snapshot/package rows are written. Without pooling a
+// connection is fully closed after each use, which avoids "database is locked" errors when a pooled connection is
+// returned while another request holds the write lock; DefaultTimeout makes busy commands wait instead of failing.
 var configurationConnectionString = new SqliteConnectionStringBuilder
 {
     DataSource = configurationDatabasePath,
-    ForeignKeys = true
+    ForeignKeys = true,
+    Pooling = false,
+    DefaultTimeout = 30
 }.ToString();
 var logIndexConnectionString = new SqliteConnectionStringBuilder
 {
@@ -144,6 +149,22 @@ if (!app.Environment.IsDevelopment())
     app.UseExceptionHandler("/Home/Error");
 }
 app.UseStaticFiles();
+// API callers always get JSON: an unexpected error becomes { success:false, error } instead of an HTML/text page.
+app.Use(async (context, next) =>
+{
+    if (!context.Request.Path.StartsWithSegments("/api")) { await next(context); return; }
+    try { await next(context); }
+    catch (Exception exception) when (!context.Response.HasStarted && exception is not OperationCanceledException)
+    {
+        context.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger("DevTools.Api")
+            .LogError(exception, "Unhandled API error on {Method} {Path}", context.Request.Method, context.Request.Path);
+        context.Response.Clear();
+        context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+        var busy = exception is SqliteException { SqliteErrorCode: 5 or 6 };
+        await context.Response.WriteAsJsonAsync(new DevTools.Shared.Models.ApiResult<object>(false, null,
+            busy ? "The database is busy with another operation. Wait a moment and try again." : "An unexpected error occurred. Try again, and check the server log if it keeps happening."));
+    }
+});
 app.UseRouting();
 
 app.UseRateLimiter();

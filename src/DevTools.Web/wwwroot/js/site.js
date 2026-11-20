@@ -47,7 +47,12 @@
       throw new Error('Your session has expired.');
     }
     if (response.status === 204) return null;
-    const result = await response.json();
+    // A non-JSON reply (for example a proxy or server error page) becomes a readable error instead of a JSON parse error.
+    const text = await response.text();
+    let result;
+    try { result = text ? JSON.parse(text) : null; }
+    catch { throw new Error(response.ok ? 'The server sent an unexpected response.' : `The server returned an error (${response.status}). Try again.`); }
+    if (!result) throw new Error(response.ok ? 'The server sent an empty response.' : `The server returned an error (${response.status}).`);
     if (!response.ok || !result.success) throw new Error(result.error || 'The operation could not be completed.');
     return result.data;
   };

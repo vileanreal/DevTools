@@ -38,7 +38,7 @@ public class HomeController(IOptions<ToolOptions> toolOptions) : Controller
     public IActionResult Deployment() => Tool("deployment", "Deployment");
 
     [HttpGet("/tools/patch-management")]
-    public IActionResult PatchManagement() => Tool("patch-management", "Deployment Patch Management");
+    public IActionResult PatchManagement() => Tool("patch-management", "Releases");
 
     [HttpGet("/tools/system-services")]
     public IActionResult SystemServices() => Tool("system-services", "System Services");

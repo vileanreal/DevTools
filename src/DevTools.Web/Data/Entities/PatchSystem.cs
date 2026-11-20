@@ -17,6 +17,8 @@ public sealed class PatchModule
     public required string Name { get; set; }
     public required string SourcePath { get; set; }
     public string? Exclusions { get; set; }
+    /// <summary>The snapshot holding this module's latest version (the files now on UAT/production).</summary>
+    public int? LatestSnapshotId { get; set; }
     public PatchSystem? PatchSystem { get; set; }
 }
 
@@ -35,6 +37,8 @@ public sealed class PatchSnapshot
     public int FileCount { get; set; }
     public long TotalBytes { get; set; }
     public required byte[] ManifestGz { get; set; }
+    /// <summary>JSON array of the module names this snapshot covers, so lists don't need to decompress the manifest.</summary>
+    public string? Modules { get; set; }
     public PatchSystem? PatchSystem { get; set; }
 }
 
@@ -56,5 +60,9 @@ public sealed class PatchPackage
     public int? BaseSnapshotId { get; set; }
     /// <summary>The snapshot of exactly what this patch contains.</summary>
     public int SnapshotId { get; set; }
+    /// <summary>JSON array of the module names in this patch.</summary>
+    public string? Modules { get; set; }
+    /// <summary>Gzip JSON <c>PatchChangeSet</c>: exactly what was compiled. Older patches have none and are rebuilt from snapshots.</summary>
+    public byte[]? ChangesGz { get; set; }
     public PatchSystem? PatchSystem { get; set; }
 }

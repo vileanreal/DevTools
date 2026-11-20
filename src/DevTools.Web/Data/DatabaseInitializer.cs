@@ -1,13 +1,14 @@
 using System.Data;
 using System.Data.Common;
 using Microsoft.Data.Sqlite;
+using DevTools.Web.Services;
 using Microsoft.EntityFrameworkCore;
 
 namespace DevTools.Web.Data;
 
 public static class DatabaseInitializer
 {
-    private const int CurrentSchemaVersion = 6;
+    private const int CurrentSchemaVersion = 7;
     private static readonly string[] ApplicationTables =
     [
         "LogSystems", "LogSources", "SqlDocSources", "SqlDocDiagrams", "ServiceSystems", "ManagedServices",
@@ -40,6 +41,7 @@ public static class DatabaseInitializer
             CreateCurrentSchema(connection, transaction);
             AddMissingLogSourceColumns(connection, transaction);
             AddMissingDeploymentColumns(connection, transaction);
+            AddMissingPatchColumns(connection, transaction);
             CreateCurrentIndexes(connection, transaction);
             SetSchemaVersion(connection, transaction, CurrentSchemaVersion);
             transaction.Commit();
@@ -173,6 +175,7 @@ public static class DatabaseInitializer
                 Name TEXT NOT NULL,
                 SourcePath TEXT NOT NULL,
                 Exclusions TEXT NULL,
+                LatestSnapshotId INTEGER NULL,
                 CONSTRAINT FK_PatchModules_PatchSystems_PatchSystemId FOREIGN KEY (PatchSystemId) REFERENCES PatchSystems (Id) ON DELETE CASCADE
             )
             """, transaction);
@@ -189,6 +192,7 @@ public static class DatabaseInitializer
                 FileCount INTEGER NOT NULL,
                 TotalBytes INTEGER NOT NULL,
                 ManifestGz BLOB NOT NULL,
+                Modules TEXT NULL,
                 CONSTRAINT FK_PatchSnapshots_PatchSystems_PatchSystemId FOREIGN KEY (PatchSystemId) REFERENCES PatchSystems (Id) ON DELETE CASCADE
             )
             """, transaction);
@@ -208,6 +212,8 @@ public static class DatabaseInitializer
                 Deleted INTEGER NOT NULL,
                 BaseSnapshotId INTEGER NULL,
                 SnapshotId INTEGER NOT NULL,
+                Modules TEXT NULL,
+                ChangesGz BLOB NULL,
                 CONSTRAINT FK_PatchPackages_PatchSystems_PatchSystemId FOREIGN KEY (PatchSystemId) REFERENCES PatchSystems (Id) ON DELETE CASCADE
             )
             """, transaction);
@@ -237,6 +243,56 @@ public static class DatabaseInitializer
         if (!Columns(connection, transaction, "DeploymentPackages").Contains("Description")) Execute(connection, "ALTER TABLE DeploymentPackages ADD COLUMN Description TEXT NULL", transaction);
     }
 
+    /// <summary>
+    /// v7: each module has its own latest version. Adds the columns and, only when they are first added, fills them from
+    /// existing rows: every module contained in the system's old "latest" snapshot points at it, and each snapshot's
+    /// module names are copied out of its manifest. Rows are only updated, never removed.
+    /// </summary>
+    private static void AddMissingPatchColumns(DbConnection connection, DbTransaction transaction)
+    {
+        var snapshotColumns = Columns(connection, transaction, "PatchSnapshots");
+        var fillSnapshotModules = !snapshotColumns.Contains("Modules");
+        if (fillSnapshotModules) Execute(connection, "ALTER TABLE PatchSnapshots ADD COLUMN Modules TEXT NULL", transaction);
+        var packageColumns = Columns(connection, transaction, "PatchPackages");
+        if (!packageColumns.Contains("Modules")) Execute(connection, "ALTER TABLE PatchPackages ADD COLUMN Modules TEXT NULL", transaction);
+        if (!packageColumns.Contains("ChangesGz")) Execute(connection, "ALTER TABLE PatchPackages ADD COLUMN ChangesGz BLOB NULL", transaction);
+        var fillModulePointers = !Columns(connection, transaction, "PatchModules").Contains("LatestSnapshotId");
+        if (fillModulePointers) Execute(connection, "ALTER TABLE PatchModules ADD COLUMN LatestSnapshotId INTEGER NULL", transaction);
+        if (!fillSnapshotModules && !fillModulePointers) return;
+
+        var snapshots = new List<(long Id, long SystemId, bool IsLatest, List<DevTools.Shared.Models.PatchModuleManifest> Manifest)>();
+        using (var command = connection.CreateCommand())
+        {
+            command.Transaction = transaction;
+            command.CommandText = "SELECT Id, PatchSystemId, IsLatest, ManifestGz FROM PatchSnapshots";
+            using var reader = command.ExecuteReader();
+            while (reader.Read())
+            {
+                List<DevTools.Shared.Models.PatchModuleManifest> manifest;
+                try { manifest = PatchCodec.ReadManifest((byte[])reader.GetValue(3)); }
+                catch (Exception exception) when (exception is InvalidDataException or System.Text.Json.JsonException) { manifest = []; }
+                snapshots.Add((reader.GetInt64(0), reader.GetInt64(1), reader.GetInt64(2) != 0, manifest));
+            }
+        }
+        var modules = new List<(long Id, long SystemId, string Name)>();
+        using (var command = connection.CreateCommand())
+        {
+            command.Transaction = transaction;
+            command.CommandText = "SELECT Id, PatchSystemId, Name FROM PatchModules";
+            using var reader = command.ExecuteReader();
+            while (reader.Read()) modules.Add((reader.GetInt64(0), reader.GetInt64(1), reader.GetString(2)));
+        }
+        if (fillSnapshotModules)
+            foreach (var snapshot in snapshots)
+                Execute(connection, "UPDATE PatchSnapshots SET Modules = $value WHERE Id = $id", transaction,
+                    ("$value", PatchCodec.WriteNames(snapshot.Manifest.Select(item => item.ModuleName))), ("$id", snapshot.Id));
+        if (fillModulePointers)
+            foreach (var snapshot in snapshots.Where(item => item.IsLatest))
+                foreach (var module in modules.Where(item => item.SystemId == snapshot.SystemId && snapshot.Manifest.Any(manifest =>
+                             manifest.ModuleId == item.Id || manifest.ModuleName.Equals(item.Name, StringComparison.OrdinalIgnoreCase))))
+                    Execute(connection, "UPDATE PatchModules SET LatestSnapshotId = $value WHERE Id = $id", transaction, ("$value", snapshot.Id), ("$id", module.Id));
+    }
+
     private static void CreateCurrentIndexes(DbConnection connection, DbTransaction transaction)
     {
         Execute(connection, "CREATE UNIQUE INDEX IF NOT EXISTS IX_LogSystems_Name ON LogSystems (Name)", transaction);
@@ -252,6 +308,7 @@ public static class DatabaseInitializer
         Execute(connection, "CREATE UNIQUE INDEX IF NOT EXISTS IX_PatchSystems_Name ON PatchSystems (Name)", transaction);
         Execute(connection, "CREATE UNIQUE INDEX IF NOT EXISTS IX_PatchModules_PatchSystemId_Name ON PatchModules (PatchSystemId, Name)", transaction);
         Execute(connection, "CREATE INDEX IF NOT EXISTS IX_PatchSnapshots_PatchSystemId_CreatedAtUtc ON PatchSnapshots (PatchSystemId, CreatedAtUtc)", transaction);
+        Execute(connection, "CREATE INDEX IF NOT EXISTS IX_PatchModules_LatestSnapshotId ON PatchModules (LatestSnapshotId)", transaction);
         Execute(connection, "CREATE INDEX IF NOT EXISTS IX_PatchPackages_PatchSystemId_CreatedAtUtc ON PatchPackages (PatchSystemId, CreatedAtUtc)", transaction);
     }
 
@@ -262,7 +319,10 @@ public static class DatabaseInitializer
         string[] requiredColumns = ["Format", "CustomPattern", "TimestampFormat", "IncludeSubdirectories", "FileNameFilter"];
         if (requiredColumns.Any(column => !columns.Contains(column))) return true;
         return !Columns(connection, null, "DeploymentSystems").Contains("PackageDirectory")
-            || !Columns(connection, null, "DeploymentPackages").Contains("Description");
+            || !Columns(connection, null, "DeploymentPackages").Contains("Description")
+            || !Columns(connection, null, "PatchModules").Contains("LatestSnapshotId")
+            || !Columns(connection, null, "PatchSnapshots").Contains("Modules")
+            || !Columns(connection, null, "PatchPackages").Contains("ChangesGz");
     }
 
     private static int GetSchemaVersion(DbConnection connection)
@@ -330,11 +390,18 @@ public static class DatabaseInitializer
         return columns;
     }
 
-    private static void Execute(DbConnection connection, string sql, DbTransaction? transaction = null)
+    private static void Execute(DbConnection connection, string sql, DbTransaction? transaction = null, params (string Name, object? Value)[] parameters)
     {
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = sql;
+        foreach (var (name, value) in parameters)
+        {
+            var parameter = command.CreateParameter();
+            parameter.ParameterName = name;
+            parameter.Value = value ?? DBNull.Value;
+            command.Parameters.Add(parameter);
+        }
         command.ExecuteNonQuery();
     }
 }

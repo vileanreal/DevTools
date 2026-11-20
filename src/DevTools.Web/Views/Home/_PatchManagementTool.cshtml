@@ -1,6 +1,6 @@
 <div class="deploy-page patch-page">
 <div class="tool-heading compact-tool-heading deploy-heading">
-    <div><span class="eyebrow">RELEASE OPERATIONS</span><h1>Deployment Patch Management</h1><p>Track the files of each module on this server, see what changed since the version on UAT/production, and compile the changes into a patch for the client.</p></div>
+    <div><span class="eyebrow">RELEASE OPERATIONS</span><h1>Releases</h1><p>Track each module's files on this server, see what changed since the version on UAT/production, and compile the modules you choose into a patch for the client.</p></div>
     <span class="badge-soft">Snapshots · SHA-256</span>
 </div>
 
@@ -24,35 +24,43 @@
     <div class="deploy-layout deploy-layout-single">
         <div id="patch-no-modules" class="deploy-no-modules d-none">This system has no modules yet. <button id="patch-no-modules-add" class="btn btn-sm btn-primary" type="button">＋ Add module</button></div>
 
-        <section class="deploy-card patch-version-card">
-            <div class="patch-version">
-                <div class="patch-version-info">
-                    <span class="eyebrow">LATEST VERSION</span>
-                    <strong id="patch-latest-title">Not set yet</strong>
-                    <small id="patch-latest-meta">Set the current files as the latest version once they match UAT/production.</small>
-                </div>
-                <div class="patch-version-actions">
+        <section class="deploy-card patch-modules-card">
+            <div class="patch-toolbar">
+                <div class="patch-toolbar-title"><h3>Modules</h3><span id="patch-modules-meta">Each module has its own latest version. Tick the modules to include in a patch.</span></div>
+                <div class="patch-toolbar-actions">
                     <label class="patch-compare"><span>Compare with</span><select id="patch-compare-base" class="form-select form-select-sm"></select></label>
-                    <button id="patch-view-changes" class="btn btn-sm btn-outline-primary" type="button">View changes</button>
+                    <button id="patch-view-changes" class="btn btn-sm btn-outline-primary" type="button" title="Scan the module folders again">↻ Check changes</button>
+                    <button id="patch-set-latest" class="btn btn-sm deploy-btn-modules" type="button" title="Record the selected modules' current files as the version on UAT/production">Set as latest</button>
                     <button id="patch-compile" class="btn btn-sm btn-primary" type="button">Compile patch</button>
-                    <button id="patch-set-latest" class="btn btn-sm deploy-btn-modules" type="button">Set current as latest</button>
                 </div>
+            </div>
+            <div class="patch-table-wrap">
+                <table class="patch-table patch-module-table">
+                    <thead><tr>
+                        <th class="patch-col-check"><input id="patch-select-all" class="form-check-input" type="checkbox" aria-label="Select all modules"></th>
+                        <th>Module</th><th>Latest version</th>
+                        <th class="patch-col-num kind-added">Added</th><th class="patch-col-num kind-changed">Changed</th><th class="patch-col-num kind-deleted">Deleted</th>
+                    </tr></thead>
+                    <tbody id="patch-module-rows"></tbody>
+                </table>
             </div>
         </section>
 
-        <section id="patch-changes" class="deploy-card d-none" aria-live="polite">
-            <div class="deploy-card-head"><h3 id="patch-changes-title">Changes</h3><span id="patch-changes-meta"></span></div>
-            <div id="patch-changes-body"></div>
+        <section id="patch-changes" class="deploy-card" aria-live="polite">
+            <div class="deploy-card-head"><h3 id="patch-changes-title">Pending changes</h3><span id="patch-changes-meta"></span></div>
+            <div id="patch-changes-body"><div class="empty-state compact">Checking files…</div></div>
         </section>
 
         <section class="deploy-card">
             <div class="deploy-card-head"><h3>Patches</h3><span>Compiled patches, newest first</span></div>
-            <div id="patch-package-list" class="deploy-package-list"><div class="empty-state">No patches compiled yet.</div></div>
+            <div id="patch-package-list"><div class="empty-state">No patches compiled yet.</div></div>
+            <div id="patch-package-pager" class="deploy-pager d-none"></div>
         </section>
 
         <section class="deploy-card">
-            <div class="deploy-card-head"><h3>Snapshots</h3><span>Every recorded version of the files, newest first</span></div>
-            <div id="patch-snapshot-list" class="deploy-package-list"><div class="empty-state">No snapshots yet.</div></div>
+            <div class="deploy-card-head"><h3>Snapshots</h3><span>Every recorded version of the module files, newest first</span></div>
+            <div id="patch-snapshot-list"><div class="empty-state">No snapshots yet.</div></div>
+            <div id="patch-snapshot-pager" class="deploy-pager d-none"></div>
         </section>
     </div>
 </section>
@@ -94,6 +102,10 @@
         <div class="modal-header"><div><h5 class="modal-title" id="patch-compile-title">Compile patch</h5><p id="patch-compile-subtitle" class="modal-subtitle"></p></div><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
         <div class="modal-body service-form-fields">
             <div>
+                <div class="patch-field-head"><span class="field-label">Modules in this patch</span><button id="patch-compile-all" class="btn btn-sm btn-ghost" type="button">Select all with changes</button></div>
+                <div id="patch-compile-modules" class="patch-check-list"></div>
+            </div>
+            <div>
                 <span class="field-label">Format</span>
                 <div class="dc-segmented-modes patch-format" role="radiogroup" aria-label="Patch format">
                     <label><input type="radio" name="patch-format" value="zip" checked><span><strong>.zip</strong><small>Opens anywhere, including Windows Explorer</small></span></label>
@@ -101,6 +113,7 @@
                 </div>
             </div>
             <div><label class="field-label" for="patch-compile-label">Description <span class="text-muted fw-normal">(optional)</span></label><input id="patch-compile-label" class="form-control" maxlength="500" placeholder="e.g. Redmine #1234 — invoice export fix"></div>
+            <label class="patch-option"><input id="patch-compile-latest" class="form-check-input" type="checkbox"><span><strong>Make this the latest version</strong><small>Tick when this patch goes to UAT/production now. The selected modules' next changes are then measured from it; other modules keep their own version. You can also do this later from the patch.</small></span></label>
             <div class="patch-compile-structure"><strong>Inside the patch</strong><code>&lt;module&gt;/ADDED/…</code><code>&lt;module&gt;/CHANGED/…</code><code>&lt;module&gt;/DELETED/DELETED-FILES.txt</code><code>PATCH-NOTES.txt</code></div>
         </div>
         <div class="modal-footer"><button type="button" class="btn btn-ghost" data-bs-dismiss="modal">Cancel</button><button id="patch-compile-submit" class="btn btn-primary" type="submit">Compile</button></div>
@@ -109,9 +122,10 @@
 
 <div class="modal fade" id="patchLatestModal" tabindex="-1" aria-labelledby="patch-latest-modal-title" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered"><form id="patch-latest-form" class="modal-content">
-        <div class="modal-header"><h5 class="modal-title" id="patch-latest-modal-title">Set current as latest version?</h5><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
+        <div class="modal-header"><h5 class="modal-title" id="patch-latest-modal-title">Set current files as the latest version</h5><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
         <div class="modal-body service-form-fields">
-            <p class="mb-0">Takes a snapshot of every module's files now and marks it as the version on UAT/production. Later changes are measured from it.</p>
+            <p class="mb-0">Takes a snapshot of the selected modules' files now and marks it as their version on UAT/production. Their later changes are measured from it; other modules keep their own version.</p>
+            <div><div class="patch-field-head"><span class="field-label">Modules</span></div><div id="patch-latest-modules" class="patch-check-list"></div></div>
             <div><label class="field-label" for="patch-latest-label">Label <span class="text-muted fw-normal">(optional)</span></label><input id="patch-latest-label" class="form-control" maxlength="500" placeholder="e.g. Production release 2.4"></div>
         </div>
         <div class="modal-footer"><button type="button" class="btn btn-ghost" data-bs-dismiss="modal">Cancel</button><button id="patch-latest-submit" class="btn btn-primary" type="submit">Set as latest</button></div>
