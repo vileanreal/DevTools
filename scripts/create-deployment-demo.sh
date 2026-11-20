@@ -16,6 +16,9 @@
 #                                                       # marked as the latest version, then a simulated new build so
 #                                                       # the module table and Compile have changes to show. The second
 #                                                       # ("Customer Portal Patches") has ~130 changes across folders.
+#   scripts/create-deployment-demo.sh --large-package  # only write SampleApp-Release-3.0-large.zip (~270 files in many
+#                                                       # folders, for the Sample App system) to ~/Downloads, to try the
+#                                                       # folder groups and "Show more" in the package and deploy dialogs
 #   scripts/create-deployment-demo.sh --make-packages [N]
 #                                                       # only write N test packages (default 24) to
 #                                                       # ~/Downloads/SampleApp-test-packages for uploading by hand;
@@ -30,12 +33,14 @@ set -euo pipefail
 POPULATE=0
 MAKE_ONLY=0
 PATCH_DEMO=0
+LARGE_ONLY=0
 case "${1:-}" in
+  --large-package) LARGE_ONLY=1 ;;
   --populate) POPULATE="${2:-24}" ;;
   --make-packages) POPULATE="${2:-24}"; MAKE_ONLY=1 ;;
   --patch-demo) PATCH_DEMO=1 ;;
   "") ;;
-  *) echo "Usage: $0 [--populate N | --make-packages N | --patch-demo]" >&2; exit 1 ;;
+  *) echo "Usage: $0 [--populate N | --make-packages N | --patch-demo | --large-package]" >&2; exit 1 ;;
 esac
 [[ "$POPULATE" =~ ^[0-9]+$ ]] || { echo "Usage: $0 [--populate N | --make-packages N]" >&2; exit 1; }
 
@@ -71,6 +76,35 @@ build_test_package() {
   printf '%s\t%s\n' "SampleApp-Release-$version.zip" "$(test_description "$i")" >> "$TEST_PACKAGES/descriptions.txt"
   echo "$zip_path"
 }
+
+# ---------- A large package: many files in many folders ----------
+LARGE_PACKAGE="SampleApp-Release-3.0-large.zip"
+build_large_package() {
+  local root="$work/large/release-3.0"
+  rm -rf "$work/large"
+  # WebApi: replaces the existing dlls and adds many new files across folders.
+  write "$root/WebApi/bin/SampleApp.Api.dll"  "SampleApp.Api v3.0.0"
+  write "$root/WebApi/bin/SampleApp.Core.dll" "SampleApp.Core v3.0.0"
+  for i in $(seq -f %02g 1 38); do write "$root/WebApi/bin/SampleApp.Module$i.dll" "module $i v3.0.0"; done
+  for i in $(seq -f %02g 1 60); do write "$root/WebApi/wwwroot/js/page-$i.js" "console.log('page $i v3');"; done
+  write "$root/WebApi/wwwroot/js/app.js" "console.log('SampleApp web v3.0.0');"
+  for i in $(seq -f %02g 1 15); do write "$root/WebApi/wwwroot/css/theme-$i.css" "/* theme $i v3 */"; done
+  for i in $(seq -f %02g 1 30); do write "$root/WebApi/wwwroot/images/banner-$i.svg" "<svg><!-- banner $i --></svg>"; done
+  for i in $(seq -f %02g 1 25); do write "$root/WebApi/Views/Shared/Partial$i.cshtml" "@* partial $i v3 *@"; done
+  for i in $(seq -f %02g 1 12); do write "$root/WebApi/Views/Reports/Report$i.cshtml" "@* report $i v3 *@"; done
+  write "$root/WebApi/web.config" "<configuration><!-- build settings: excluded by the module --></configuration>"
+  write "$root/WebApi/SampleApp.WebApi.deps.json" '{ "version": "3.0.0" }'
+  # Worker: replaced files plus new plugins and job definitions.
+  write "$root/Worker/SampleApp.Worker.exe" "SampleApp.Worker v3.0.0"
+  write "$root/Worker/SampleApp.Worker.dll" "SampleApp.Worker v3.0.0"
+  for i in $(seq -f %02g 1 30); do write "$root/Worker/Plugins/Exporter$i.dll" "exporter $i v3.0.0"; done
+  for i in $(seq -f %02g 1 40); do write "$root/Worker/Jobs/job-$i.json" "{ \"job\": $i }"; done
+  mkdir -p "$DOWNLOADS"
+  rm -f "$DOWNLOADS/$LARGE_PACKAGE"
+  (cd "$work/large" && zip -qr -X "$DOWNLOADS/$LARGE_PACKAGE" release-3.0)
+  echo "Large package: $DOWNLOADS/$LARGE_PACKAGE ($(find "$root" -type f | wc -l | tr -d ' ') files)"
+}
+if [[ "$LARGE_ONLY" -eq 1 ]]; then build_large_package; exit 0; fi
 
 # ---------- Mock system for Releases ----------
 if [[ "$PATCH_DEMO" -eq 1 ]]; then
@@ -235,6 +269,7 @@ mkdir -p "$DOWNLOADS"
 rm -f "$DOWNLOADS/$PACKAGE_NAME"
 (cd "$work" && zip -qr -X "$DOWNLOADS/$PACKAGE_NAME" release-2.0)
 echo "Package: $DOWNLOADS/$PACKAGE_NAME"
+build_large_package
 
 if [[ "${SKIP_REGISTER:-0}" == "1" ]]; then
   echo "Skipping DevTools registration (SKIP_REGISTER=1)."

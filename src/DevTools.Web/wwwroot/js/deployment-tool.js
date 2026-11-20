@@ -334,6 +334,62 @@
     pager.querySelector('select').addEventListener('change', event => { packagePageSize = Number(event.target.value); packagePage = 1; renderPackages(); });
   };
 
+  // ---------- File trees (package details and deploy preview) ----------
+  // Files are grouped by top-level folder (bin/, wwwroot/ …) that can be collapsed, and at most TREE_ROWS files are listed
+  // until "Show more" is pressed. A list with more files than that starts with its folders collapsed. The state lives on
+  // the host element, so re-rendering after a filter change keeps what the user expanded.
+  const TREE_ROWS = 15;
+  const treeState = new WeakMap();
+  const folderOf = path => { const index = path.search(/[\\/]/); return index < 0 ? '' : path.slice(0, index); };
+  const renderFileTree = (host, files, { tag = null, reset = false, expandAll = false, emptyText = 'No files match this view.' } = {}) => {
+    let state = treeState.get(host);
+    if (!state || reset) {
+      state = { collapsed:new Set(), limit:TREE_ROWS };
+      const folders = new Set(files.map(file => folderOf(file.path)));
+      if (files.length > TREE_ROWS && folders.size > 1) folders.forEach(folder => state.collapsed.add(folder));
+      treeState.set(host, state);
+    }
+    if (!files.length) { host.innerHTML = `<p class="deploy-preview-note">${escapeHtml(emptyText)}</p>`; return; }
+    const columns = tag ? 3 : 2;
+    const groups = new Map();
+    files.forEach(file => { const folder = folderOf(file.path); if (!groups.has(folder)) groups.set(folder, []); groups.get(folder).push(file); });
+    const ordered = [...groups.entries()].sort(([a], [b]) => (a === '') - (b === '') || a.localeCompare(b, undefined, { sensitivity:'base' }));
+    const rows = [];
+    let shown = 0, hidden = 0;
+    for (const [folder, folderFiles] of ordered) {
+      const isCollapsed = !expandAll && state.collapsed.has(folder), starved = !isCollapsed && shown >= state.limit;
+      rows.push(`<tr class="patch-folder-row ${isCollapsed ? 'collapsed' : ''}"><td colspan="${columns}">
+        <button type="button" class="patch-folder-toggle" data-folder="${escapeHtml(folder)}" aria-expanded="${!isCollapsed}">
+          <span class="patch-folder-caret" aria-hidden="true">▶</span><span class="patch-folder-name">${folder ? `${escapeHtml(folder)}/` : '(module root)'}</span>
+          <span class="patch-folder-count">${plural(folderFiles.length, 'file')} · ${bytes(folderFiles.reduce((total, file) => total + (file.size || 0), 0))}${starved ? ' · use Show more below' : ''}</span>
+        </button></td></tr>`);
+      if (isCollapsed) continue;
+      const visible = folderFiles.slice(0, Math.max(0, state.limit - shown));
+      shown += visible.length; hidden += folderFiles.length - visible.length;
+      visible.forEach(file => {
+        const rest = folder ? file.path.slice(folder.length + 1) : file.path;
+        rows.push(`<tr class="patch-change-row deploy-tree-row ${file.action ? `action-${file.action}` : ''}">${tag ? `<td class="patch-col-kind">${tag(file)}</td>` : ''}<td><code title="${escapeHtml(file.path)}">${folder ? `<span class="patch-path-prefix">${escapeHtml(folder)}/</span>` : ''}${escapeHtml(rest)}</code></td><td class="patch-col-size">${bytes(file.size)}</td></tr>`);
+      });
+    }
+    if (hidden > 0) rows.push(`<tr class="patch-more-row"><td colspan="${columns}"><span class="patch-more">
+        <button type="button" class="btn btn-sm btn-soft-primary" data-tree="more">Show ${Math.min(TREE_ROWS, hidden)} more</button>
+        ${hidden > TREE_ROWS ? `<button type="button" class="btn btn-sm btn-ghost" data-tree="all">Show all ${hidden.toLocaleString()}</button>` : ''}
+        <small>${plural(hidden, 'more file')}</small></span></td></tr>`);
+    else if (state.limit > TREE_ROWS) rows.push(`<tr class="patch-more-row"><td colspan="${columns}"><span class="patch-more"><button type="button" class="btn btn-sm btn-ghost" data-tree="less">Show less</button></span></td></tr>`);
+    host.innerHTML = `<div class="patch-table-wrap deploy-tree-wrap"><table class="patch-table patch-changes-table deploy-tree-table"><tbody>${rows.join('')}</tbody></table></div>`;
+    const again = () => renderFileTree(host, files, { tag, expandAll, emptyText });
+    host.querySelectorAll('[data-folder]').forEach(button => button.addEventListener('click', () => {
+      const folder = button.dataset.folder;
+      if (state.collapsed.has(folder)) state.collapsed.delete(folder); else state.collapsed.add(folder);
+      again();
+    }));
+    host.querySelectorAll('[data-tree]').forEach(button => button.addEventListener('click', () => {
+      const action = button.dataset.tree;
+      state.limit = action === 'more' ? state.limit + TREE_ROWS : action === 'all' ? Infinity : TREE_ROWS;
+      again();
+    }));
+  };
+
   // ---------- Package details ----------
   const packageModal = bootstrap.Modal.getOrCreateInstance(byId('deployPackageModal'));
   let openPackageId = null;
@@ -348,12 +404,15 @@
       if (openPackageId !== packageId) return;
       filesHost.innerHTML = contents.modules.map(module => `<section class="deploy-details-module">
           <header><strong>${escapeHtml(module.moduleName || module.folderName)}</strong><span>${plural(module.files.length, 'file')} · ${bytes(module.files.reduce((total, file) => total + file.size, 0))}${module.truncated ? ' · first files only' : ''}</span></header>
-          <ul class="deploy-file-list">${module.files.map(file => `<li><code>${escapeHtml(file.path)}</code><small>${bytes(file.size)}</small></li>`).join('')}</ul>
+          <div class="deploy-module-tree"></div>
         </section>`).join('') || '<div class="empty-state compact">No module files.</div>';
+      const trees = [...filesHost.querySelectorAll('.deploy-module-tree')];
+      trees.forEach((tree, index) => renderFileTree(tree, contents.modules[index].files, { reset:true }));
+      // Searching lists every matching file with its folders expanded; clearing the search restores the folder view.
       const filter = byId('deploy-package-filter');
       filter.oninput = () => {
         const text = filter.value.trim().toLowerCase();
-        filesHost.querySelectorAll('.deploy-file-list li').forEach(row => row.hidden = Boolean(text) && !row.textContent.toLowerCase().includes(text));
+        trees.forEach((tree, index) => renderFileTree(tree, contents.modules[index].files.filter(file => !text || file.path.toLowerCase().includes(text)), { expandAll:Boolean(text), emptyText:'No files match the search.' }));
       };
     } catch (error) { if (openPackageId === packageId) filesHost.innerHTML = `<div class="deploy-error">${escapeHtml(error.message)}</div>`; }
   };
@@ -474,21 +533,19 @@
           <div class="deploy-preview-counts">${counts.map(([action, count]) => `<button type="button" class="deploy-file-tag action-${action}" data-filter="${action}">${previewLabels[action]} ${count.toLocaleString()}</button>`).join('')}<button type="button" class="deploy-file-tag active" data-filter="">All</button></div>
         </div>
         ${request.mode ? '' : '<p class="deploy-preview-note">Choose an update type to also see which existing files a whole-package update would delete.</p>'}
-        <p class="deploy-preview-note preview-empty d-none">No files match this view.</p>
-        <ul class="deploy-file-list">${result.files.map(file => `<li data-action="${file.action}"><span class="deploy-file-tag action-${file.action}">${previewLabels[file.action]}</span><code>${escapeHtml(file.path)}</code><small>${bytes(file.size)}</small></li>`).join('')}</ul>
+        <div class="deploy-preview-tree"></div>
         ${result.truncated ? `<p class="deploy-preview-note">Showing the first ${result.files.length.toLocaleString()} files.</p>` : ''}`;
       // "Patch files only" (the default) shows just the files that will be copied: new and replaced.
       const patchOnly = body.querySelector('.preview-patch-only');
       let filter = '';
+      const tree = body.querySelector('.deploy-preview-tree');
+      const tag = file => `<span class="deploy-file-tag action-${file.action}">${previewLabels[file.action]}</span>`;
       const apply = () => {
         section.dataset.patchOnly = String(patchOnly.checked);
-        let visible = 0;
-        body.querySelectorAll('.deploy-file-list li').forEach(row => {
-          const show = (!patchOnly.checked || ['new', 'replace'].includes(row.dataset.action)) && (!filter || row.dataset.action === filter);
-          row.hidden = !show; if (show) visible++;
-        });
+        const files = result.files.filter(file => (!patchOnly.checked || ['new', 'replace'].includes(file.action)) && (!filter || file.action === filter));
+        // A new view (patch-only switch or a different filter) starts again from the folder overview.
+        renderFileTree(tree, files, { tag, reset:true });
         body.querySelectorAll('[data-filter]').forEach(button => button.classList.toggle('active', button.dataset.filter === filter));
-        body.querySelector('.preview-empty').classList.toggle('d-none', visible > 0);
       };
       patchOnly.addEventListener('change', apply);
       body.querySelectorAll('[data-filter]').forEach(button => button.addEventListener('click', () => {
