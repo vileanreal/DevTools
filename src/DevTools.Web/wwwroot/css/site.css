@@ -1063,3 +1063,30 @@ html[data-theme="dark"] .patch-chip.latest { border-color:rgba(34,197,94,.35); b
   .patch-path { max-width:200px; }
 }
 #patch-changes .empty-state, .patch-page .deploy-card > div > .empty-state { min-height:0; padding:1rem; font-size:.8rem; }
+/* Releases: folder groups and "show more" inside the changes table */
+.patch-change-tools { display:inline-flex; gap:.25rem; margin-left:auto; }
+.patch-change-tools .btn { height:26px; min-height:26px; padding:0 .55rem; font-size:.72rem; }
+.patch-folder-row td { padding:0 !important; background:var(--surface-soft); border-right:0 !important; }
+.patch-folder-toggle { display:flex; width:100%; align-items:center; gap:.5rem; padding:.28rem .6rem .28rem 1.1rem; border:0; background:transparent; color:var(--ink); font-size:.76rem; text-align:left; }
+.patch-folder-toggle:hover { background:color-mix(in srgb,var(--brand) 6%,transparent); }
+.patch-folder-toggle:focus-visible { outline:2px solid color-mix(in srgb,var(--brand) 55%,transparent); outline-offset:-2px; }
+.patch-folder-caret { display:inline-block; width:.8rem; color:var(--muted); transition:transform .12s; }
+.patch-folder-row.collapsed .patch-folder-caret { transform:rotate(-90deg); }
+.patch-folder-name { font-family:var(--bs-font-monospace); font-weight:700; }
+.patch-folder-count { color:var(--muted); font-size:.7rem; }
+.patch-folder-row .patch-module-counts { margin-left:auto; font-size:.7rem; }
+.patch-change-row td:nth-child(2) { padding-left:1.4rem; }
+.patch-path-prefix { color:var(--muted); }
+.patch-more-row td { padding:.35rem .6rem !important; border-right:0 !important; }
+.patch-more { display:flex; align-items:center; justify-content:flex-start; gap:.4rem; }
+.patch-more .btn { height:26px; min-height:26px; padding:0 .6rem; font-size:.72rem; font-weight:650; }
+.patch-more small { color:var(--muted); font-size:.72rem; }
+.patch-group-row th { top:28px; }
+.patch-folder-caret { font-size:.62rem; transform:rotate(90deg); text-align:center; }
+.patch-folder-row.collapsed .patch-folder-caret { transform:rotate(0deg); }
+/* System Logs: the Index logs action stands out from the filters */
+.log-index-btn { --bs-btn-color:#fff; --bs-btn-bg:#f79009; --bs-btn-border-color:#f79009; --bs-btn-hover-color:#fff; --bs-btn-hover-bg:#dc6803; --bs-btn-hover-border-color:#dc6803; --bs-btn-active-color:#fff; --bs-btn-active-bg:#b54708; --bs-btn-active-border-color:#b54708; --bs-btn-disabled-color:#fff; --bs-btn-disabled-bg:#f79009; --bs-btn-disabled-border-color:#f79009; display:inline-flex; align-items:center; gap:.4rem; padding-inline:.95rem; font-weight:750; box-shadow:0 4px 12px rgba(247,144,9,.35); }
+.log-index-btn:hover { box-shadow:0 6px 16px rgba(220,104,3,.4); }
+.log-index-icon { display:inline-block; font-size:1.05rem; line-height:1; }
+.log-index-btn:hover .log-index-icon { transform:rotate(90deg); transition:transform .2s; }
+.dock-index-actions .log-index-btn { min-height:35px; }

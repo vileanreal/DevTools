@@ -233,30 +233,82 @@
   // Renders a change list as a table grouped by module, with filter chips that only affect this host.
   const kindLabels = { ADDED:'Added', CHANGED:'Changed', DELETED:'Deleted' };
   const sizeText = file => file.kind === 'DELETED' ? bytes(file.previousSize) : file.kind === 'CHANGED' ? `${bytes(file.previousSize)} → ${bytes(file.size)}` : bytes(file.size);
+  // Each module's files are grouped by top-level folder (bin/, wwwroot/ …) that can be collapsed, and a module shows at most
+  // PAGE_ROWS files until "Show more" is pressed. Collapsed folders and row limits survive filter changes in this host.
+  const PAGE_ROWS = 15;
+  const folderOf = path => { const index = path.search(/[\\/]/); return index < 0 ? '' : path.slice(0, index); };
+  const countsHtml = (added, changed, deleted) => `${added ? `<span class="patch-count added">+${added}</span>` : ''}${changed ? `<span class="patch-count changed">~${changed}</span>` : ''}${deleted ? `<span class="patch-count deleted">−${deleted}</span>` : ''}`;
   const mountChanges = (host, result, { showBase = true } = {}) => {
     let filter = '';
+    const collapsed = new Set(), limits = new Map();
+    // A module with more changes than fit starts with its folders collapsed, so its folder list is the overview.
+    result.modules.filter(item => pending(item) > PAGE_ROWS).forEach(item => {
+      const folders = new Set(result.files.filter(file => file.module === item.module).map(file => folderOf(file.path)));
+      if (folders.size > 1) folders.forEach(folder => collapsed.add(`${item.module}\n${folder}`));
+    });
     const draw = () => {
       const total = result.added + result.changed + result.deleted;
       if (!total) { host.innerHTML = '<div class="empty-state compact">No changes — the files match their version.</div>'; return; }
       const groups = result.modules.filter(item => pending(item) > 0).map(item => ({ item, files: result.files.filter(file => file.module === item.module && (!filter || file.kind === filter)) })).filter(group => group.files.length);
+      const moduleBody = ({ item, files }) => {
+        const folders = new Map();
+        files.forEach(file => { const folder = folderOf(file.path); if (!folders.has(folder)) folders.set(folder, []); folders.get(folder).push(file); });
+        // Folders first (alphabetical), then files in the module root.
+        const ordered = [...folders.entries()].sort(([a], [b]) => (a === '') - (b === '') || a.localeCompare(b, undefined, { sensitivity:'base' }));
+        const limit = limits.get(item.module) ?? PAGE_ROWS;
+        let shown = 0, hidden = 0;
+        const rows = [];
+        for (const [folder, folderFiles] of ordered) {
+          const key = `${item.module}\n${folder}`, isCollapsed = collapsed.has(key), starved = !isCollapsed && shown >= limit;
+          const kinds = kind => folderFiles.filter(file => file.kind === kind).length;
+          rows.push(`<tr class="patch-folder-row ${isCollapsed ? 'collapsed' : ''}"><td colspan="3">
+            <button type="button" class="patch-folder-toggle" data-folder="${escapeHtml(key)}" aria-expanded="${!isCollapsed}">
+              <span class="patch-folder-caret" aria-hidden="true">▶</span><span class="patch-folder-name">${folder ? `${escapeHtml(folder)}/` : '(module root)'}</span>
+              <span class="patch-folder-count">${plural(folderFiles.length, 'file')}${starved ? ' · use Show more below' : ''}</span><span class="patch-module-counts">${countsHtml(kinds('ADDED'), kinds('CHANGED'), kinds('DELETED'))}</span>
+            </button></td></tr>`);
+          if (isCollapsed) continue;
+          const visible = folderFiles.slice(0, limit - shown);
+          shown += visible.length; hidden += folderFiles.length - visible.length;
+          visible.forEach(file => {
+            const rest = folder ? file.path.slice(folder.length + 1) : file.path;
+            rows.push(`<tr class="patch-change-row kind-${file.kind.toLowerCase()}"><td class="patch-col-kind"><span class="deploy-file-tag patch-kind-${file.kind.toLowerCase()}">${kindLabels[file.kind]}</span></td><td><code title="${escapeHtml(file.path)}">${folder ? `<span class="patch-path-prefix">${escapeHtml(folder)}/</span>` : ''}${escapeHtml(rest)}</code></td><td class="patch-col-size">${sizeText(file)}</td></tr>`);
+          });
+        }
+        if (hidden > 0) rows.push(`<tr class="patch-more-row"><td colspan="3"><span class="patch-more">
+            <button type="button" class="btn btn-sm btn-soft-primary" data-more="${escapeHtml(item.module)}">Show ${Math.min(PAGE_ROWS, hidden)} more</button>
+            ${hidden > PAGE_ROWS ? `<button type="button" class="btn btn-sm btn-ghost" data-all="${escapeHtml(item.module)}">Show all ${hidden.toLocaleString()}</button>` : ''}
+            <small>${plural(hidden, 'more file')} in ${escapeHtml(item.module)}</small></span></td></tr>`);
+        else if (limit > PAGE_ROWS) rows.push(`<tr class="patch-more-row"><td colspan="3"><span class="patch-more"><button type="button" class="btn btn-sm btn-ghost" data-less="${escapeHtml(item.module)}">Show less</button></span></td></tr>`);
+        return rows.join('');
+      };
       host.innerHTML = `
         <div class="patch-change-summary">
           ${[['', 'All', total], ['ADDED', 'Added', result.added], ['CHANGED', 'Changed', result.changed], ['DELETED', 'Deleted', result.deleted]].map(([kind, label, count]) =>
             `<button type="button" class="patch-change-chip kind-${(kind || 'all').toLowerCase()} ${filter === kind ? 'active' : ''}" data-kind="${kind}" ${count || !kind ? '' : 'disabled'}><strong>${count.toLocaleString()}</strong>${label}</button>`).join('')}
+          <span class="patch-change-tools"><button type="button" class="btn btn-sm btn-ghost" data-fold="collapse">Collapse folders</button><button type="button" class="btn btn-sm btn-ghost" data-fold="expand">Expand folders</button></span>
         </div>
         <div class="patch-table-wrap patch-changes-wrap">
           <table class="patch-table patch-changes-table">
             <thead><tr><th class="patch-col-kind">Type</th><th>File</th><th class="patch-col-size">Size</th></tr></thead>
-            ${groups.map(({ item, files }) => `<tbody>
-              <tr class="patch-group-row"><th colspan="3"><span class="patch-group-head"><strong>${escapeHtml(item.module)}</strong>
-                <span class="patch-module-counts">${item.added ? `<span class="patch-count added">+${item.added}</span>` : ''}${item.changed ? `<span class="patch-count changed">~${item.changed}</span>` : ''}${item.deleted ? `<span class="patch-count deleted">−${item.deleted}</span>` : ''}</span>
-                ${showBase ? `<small>${item.baseCreatedAt ? `since ${escapeHtml(item.baseLabel || 'snapshot')} · ${when(item.baseCreatedAt)}` : 'no earlier version — all files are new'}</small>` : ''}</span></th></tr>
-              ${files.map(file => `<tr class="patch-change-row kind-${file.kind.toLowerCase()}"><td class="patch-col-kind"><span class="deploy-file-tag patch-kind-${file.kind.toLowerCase()}">${kindLabels[file.kind]}</span></td><td><code title="${escapeHtml(file.path)}">${escapeHtml(file.path)}</code></td><td class="patch-col-size">${sizeText(file)}</td></tr>`).join('')}
+            ${groups.map(group => `<tbody>
+              <tr class="patch-group-row"><th colspan="3"><span class="patch-group-head"><strong>${escapeHtml(group.item.module)}</strong>
+                <span class="patch-module-counts">${countsHtml(group.item.added, group.item.changed, group.item.deleted)}</span>
+                ${showBase ? `<small>${group.item.baseCreatedAt ? `since ${escapeHtml(group.item.baseLabel || 'snapshot')} · ${when(group.item.baseCreatedAt)}` : 'no earlier version — all files are new'}</small>` : ''}</span></th></tr>
+              ${moduleBody(group)}
             </tbody>`).join('')}
           </table>
         </div>
         ${result.truncated ? `<p class="deploy-preview-note">Showing the first ${result.files.length.toLocaleString()} changes.</p>` : ''}`;
       host.querySelectorAll('[data-kind]').forEach(button => button.addEventListener('click', () => { filter = button.dataset.kind; draw(); }));
+      host.querySelectorAll('[data-folder]').forEach(button => button.addEventListener('click', () => { const key = button.dataset.folder; if (collapsed.has(key)) collapsed.delete(key); else collapsed.add(key); draw(); }));
+      host.querySelectorAll('[data-more]').forEach(button => button.addEventListener('click', () => { limits.set(button.dataset.more, (limits.get(button.dataset.more) ?? PAGE_ROWS) + PAGE_ROWS); draw(); }));
+      host.querySelectorAll('[data-all]').forEach(button => button.addEventListener('click', () => { limits.set(button.dataset.all, Infinity); draw(); }));
+      host.querySelectorAll('[data-less]').forEach(button => button.addEventListener('click', () => { limits.delete(button.dataset.less); draw(); }));
+      host.querySelectorAll('[data-fold]').forEach(button => button.addEventListener('click', () => {
+        collapsed.clear();
+        if (button.dataset.fold === 'collapse') groups.forEach(({ item, files }) => files.forEach(file => { const folder = folderOf(file.path); if (folder) collapsed.add(`${item.module}\n${folder}`); }));
+        draw();
+      }));
     };
     draw();
   };

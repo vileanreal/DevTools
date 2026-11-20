@@ -12,9 +12,10 @@
 #   scripts/create-deployment-demo.sh --populate [N]    # also upload N test packages (default 24) to try
 #                                                       # pagination, badges and history; some are deployed and
 #                                                       # the last deployment is rolled back
-#   scripts/create-deployment-demo.sh --patch-demo     # mock system for Releases: build folders
-#                                                       # at v1 marked as the latest version, then a simulated v2
-#                                                       # build so the module table and Compile have changes to show
+#   scripts/create-deployment-demo.sh --patch-demo     # two mock systems for Releases: build folders at v1
+#                                                       # marked as the latest version, then a simulated new build so
+#                                                       # the module table and Compile have changes to show. The second
+#                                                       # ("Customer Portal Patches") has ~130 changes across folders.
 #   scripts/create-deployment-demo.sh --make-packages [N]
 #                                                       # only write N test packages (default 24) to
 #                                                       # ~/Downloads/SampleApp-test-packages for uploading by hand;
@@ -130,6 +131,58 @@ print(next((str(s["id"]) for s in json.load(sys.stdin)["data"] if s["name"]==sys
 
   echo "Done. Open $DEVTOOLS_URL/tools/patch-management?system=$system_id — the pending changes load automatically."
   echo "Expected: 4 changed, 3 added, 2 deleted (web.config, logs/ and the untouched Reports.dll are not listed)."
+
+  # A second, larger system: many changes spread over several folders, for trying folder groups and "Show more".
+  big="$DEMO_ROOT/portal-build"
+  big_system="${PATCH_LARGE_SYSTEM_NAME:-Customer Portal Patches}"
+  echo
+  echo "Writing version 1 of the larger build to $big..."
+  rm -rf "$big"
+  for i in $(seq -f %02g 1 40); do write "$big/Portal/wwwroot/js/page-$i.js" "page $i v1"; done
+  for i in $(seq -f %02g 1 8);  do write "$big/Portal/wwwroot/css/theme-$i.css" "theme $i v1"; done
+  for i in $(seq -f %02g 1 12); do write "$big/Portal/wwwroot/images/banner-$i.png" "banner $i v1"; done
+  for i in $(seq -f %02g 1 25); do write "$big/Portal/bin/Portal.Feature$i.dll" "feature $i v1"; done
+  for i in $(seq -f %02g 1 10); do write "$big/Portal/Views/Shared/Partial$i.cshtml" "partial $i v1"; done
+  write "$big/Portal/Portal.dll" "Portal v1"
+  write "$big/Portal/web.config" "<configuration><!-- ignored --></configuration>"
+  for i in $(seq -f %02g 1 10); do write "$big/Scheduler/bin/Scheduler.Lib$i.dll" "lib $i v1"; done
+  for i in $(seq -f %02g 1 30); do write "$big/Scheduler/Jobs/job-$i.json" "{\"job\": $i, \"v\": 1}"; done
+  write "$big/Scheduler/Scheduler.exe" "Scheduler v1"
+  for i in $(seq -f %02g 1 5);  do write "$big/Reports/Templates/report-$i.rdlc" "report $i v1"; done
+
+  big_id=$(curl -fsS "$papi/systems" | python3 -c '
+import json,sys
+print(next((str(s["id"]) for s in json.load(sys.stdin)["data"] if s["name"]==sys.argv[1]), ""))' "$big_system")
+  if [[ -z "$big_id" ]]; then
+    echo "Registering '$big_system' in Releases..."
+    big_id=$(curl -fsS -X POST "$papi/systems" -H 'Content-Type: application/json' \
+      -d "{\"name\":$(jstr "$big_system"),\"outputDirectory\":$(jstr "$DEMO_ROOT/patches")}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["data"]["id"])')
+    for module in Portal Scheduler Reports; do
+      curl -fsS -o /dev/null -X POST "$papi/systems/$big_id/modules" -H 'Content-Type: application/json' \
+        -d "{\"name\":\"$module\",\"sourcePath\":$(jstr "$big/$module"),\"exclusions\":$(jstr $'web.config\nlogs/')}"
+    done
+  else
+    echo "'$big_system' already exists (id $big_id); resetting its build to version 1."
+  fi
+  curl -fsS -o /dev/null -X POST "$papi/systems/$big_id/latest" -H 'Content-Type: application/json' -d '{"label":"Portal 3.0 (production)"}'
+
+  sleep 1.2
+  echo "Simulating build 3.1..."
+  for i in $(seq -f %02g 1 22);  do write "$big/Portal/wwwroot/js/page-$i.js" "page $i v3.1"; done        # 22 CHANGED
+  for i in $(seq -f %02g 41 52); do write "$big/Portal/wwwroot/js/page-$i.js" "page $i (new)"; done        # 12 ADDED
+  for i in $(seq -f %02g 1 3);   do write "$big/Portal/wwwroot/css/theme-$i.css" "theme $i v3.1"; done     # 3 CHANGED
+  for i in $(seq -f %02g 8 12);  do rm -f "$big/Portal/wwwroot/images/banner-$i.png"; done                # 5 DELETED
+  for i in $(seq -f %02g 1 18);  do write "$big/Portal/bin/Portal.Feature$i.dll" "feature $i v3.1"; done   # 18 CHANGED
+  for i in $(seq -f %02g 26 29); do write "$big/Portal/bin/Portal.Feature$i.dll" "feature $i (new)"; done  # 4 ADDED
+  for i in $(seq -f %02g 1 4);   do write "$big/Portal/Views/Shared/Partial$i.cshtml" "partial $i v3.1"; done # 4 CHANGED
+  write "$big/Portal/Portal.dll" "Portal v3.1"                                                       # 1 CHANGED (module root)
+  for i in $(seq -f %02g 1 6);   do write "$big/Scheduler/bin/Scheduler.Lib$i.dll" "lib $i v3.1"; done     # 6 CHANGED
+  for i in $(seq -f %02g 31 50); do write "$big/Scheduler/Jobs/job-$i.json" "{\"job\": $i, \"new\": true}"; done # 20 ADDED
+  for i in $(seq -f %02g 1 5);   do rm -f "$big/Scheduler/Jobs/job-$i.json"; done                         # 5 DELETED
+  # Reports is untouched, so it shows as up to date.
+
+  echo "Done. Open $DEVTOOLS_URL/tools/patch-management?system=$big_id"
+  echo "Expected: Portal 48 changed, 16 added, 5 deleted; Scheduler 6 changed, 20 added, 5 deleted; Reports up to date."
   exit 0
 fi
 
