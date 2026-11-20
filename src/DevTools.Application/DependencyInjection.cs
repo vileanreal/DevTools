@@ -1,4 +1,5 @@
 using DevTools.Application.Services;
+using DevTools.Application.Services.Deployment;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace DevTools.Application;
@@ -11,5 +12,8 @@ public static class DependencyInjection
         .AddSingleton<IXmlFormatterService, XmlFormatterService>()
         .AddSingleton<ICodeFormatterService, CodeFormatterService>()
         .AddSingleton<ILogParserService, LogParserService>()
-        .AddSingleton<ISystemServiceRuntime, LocalSystemServiceRuntime>();
+        .AddSingleton<IDatabaseSchemaDiffService, DatabaseSchemaDiffService>()
+        .AddSingleton<ISystemServiceRuntime, LocalSystemServiceRuntime>()
+        .AddSingleton<IPackageArchiveService, PackageArchiveService>()
+        .AddSingleton<IDeploymentExecutor, DeploymentExecutor>();
 }

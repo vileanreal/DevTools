@@ -275,6 +275,9 @@
         <div class="diagram-actions">
           <button id="sql-diagram-save" class="btn btn-primary btn-sm">Save</button>
           <button id="sql-diagram-export" class="btn btn-outline-primary btn-sm">Export PNG</button>
+          <button id="sql-diagram-export-json" class="btn btn-outline-secondary btn-sm">Export diagram</button>
+          <button id="sql-diagram-import-json" class="btn btn-outline-secondary btn-sm">Import diagram</button>
+          <input id="sql-diagram-import-file" class="d-none" type="file" accept="application/json,.json">
           <button id="sql-diagram-fullscreen" class="btn btn-outline-secondary btn-sm">Fullscreen</button>
           <button id="sql-diagram-choose-objects" class="btn btn-outline-secondary btn-sm">Choose objects</button>
           <button id="sql-diagram-add-table" class="btn btn-outline-secondary btn-sm">+ Table</button>
@@ -478,6 +481,9 @@
     diagramResizeObserver.observe(byId('sql-diagram-canvas'));
     byId('sql-diagram-save')?.addEventListener('click', saveDiagram);
     byId('sql-diagram-export')?.addEventListener('click', exportDiagramPng);
+    byId('sql-diagram-export-json')?.addEventListener('click', exportDiagramJson);
+    byId('sql-diagram-import-json')?.addEventListener('click', () => byId('sql-diagram-import-file')?.click());
+    byId('sql-diagram-import-file')?.addEventListener('change', importDiagramJson);
     byId('sql-diagram-fullscreen')?.addEventListener('click', toggleDiagramFullscreen);
     byId('sql-diagram-choose-objects')?.addEventListener('click', openDiagramObjectSelector);
     byId('sql-diagram-add-table')?.addEventListener('click', addDiagramTable);
@@ -1812,6 +1818,50 @@
     diagram.nodes.push(node);
     selectOnlyNode(id);
     refreshDiagramUi();
+  };
+
+  const exportDiagramJson = () => {
+    if (!diagram) return notify('Open a database diagram before exporting.', true);
+    diagram.name = byId('sql-diagram-name')?.value || diagram.name || 'Default diagram';
+    const payload = {
+      format:'DevTools.DatabaseDiagram',
+      version:1,
+      exportedAt:new Date().toISOString(),
+      source:{ name:selectedSchema?.sourceName || '', provider:selectedSchema?.provider || '', database:selectedSchema?.databaseName || '' },
+      diagram
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type:'application/json;charset=utf-8' });
+    const link = document.createElement('a');
+    link.download = `${safeFileName(diagram.name || selectedSchema?.sourceName || 'database-diagram')}.diagram.json`;
+    link.href = URL.createObjectURL(blob);
+    link.click();
+    URL.revokeObjectURL(link.href);
+    notify('Diagram JSON exported.');
+  };
+
+  const importDiagramJson = async event => {
+    const input = event.currentTarget, file = input.files?.[0];
+    input.value = '';
+    if (!file) return;
+    if (file.size > 2_000_000) return notify('Diagram file must be 2 MB or smaller.', true);
+    try {
+      const payload = JSON.parse(await file.text());
+      const imported = payload?.format === 'DevTools.DatabaseDiagram' ? payload.diagram : payload;
+      if (!imported || !Array.isArray(imported.nodes) || !Array.isArray(imported.edges)) throw new Error('The file does not contain a valid DevTools diagram.');
+      diagram = normalizeDiagram(imported);
+      diagram.name = String(diagram.name || file.name.replace(/\.diagram\.json$|\.json$/i, '') || 'Imported diagram').slice(0, 160);
+      reconcileDiagramSchema();
+      clearNodeSelection();
+      selectedEdgeId = null;
+      selectedAnnotationId = null;
+      connectDraft = null;
+      refreshDiagramUi();
+      requestAnimationFrame(() => {
+        const canvas = byId('sql-diagram-canvas');
+        if (canvas) { canvas.scrollLeft = 0; canvas.scrollTop = 0; }
+      });
+      notify(`Diagram imported: ${diagram.name}. Click Save to keep it.`);
+    } catch (error) { notify(error.message || 'Unable to import the diagram.', true); }
   };
 
   const saveDiagram = async () => {

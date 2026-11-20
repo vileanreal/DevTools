@@ -108,7 +108,14 @@ builder.Services.AddSingleton<ILogIndexOperationCoordinator, LogIndexOperationCo
 builder.Services.AddSingleton<ILogIndexJobService, LogIndexJobService>();
 builder.Services.AddSingleton<ILogIndexClearJobService, LogIndexClearJobService>();
 builder.Services.AddScoped<ISqlDocService, SqlDocService>();
+builder.Services.AddScoped<IDatabaseCompareService, DatabaseCompareService>();
 builder.Services.AddScoped<ISystemServicesService, SystemServicesService>();
+builder.Services.AddOptions<DeploymentOptions>().Bind(builder.Configuration.GetSection(DeploymentOptions.SectionName));
+builder.Services.AddSingleton<IDeploymentPaths, DeploymentPaths>();
+builder.Services.AddSingleton<DeploymentJobService>();
+builder.Services.AddSingleton<IDeploymentJobService>(services => services.GetRequiredService<DeploymentJobService>());
+builder.Services.AddSingleton<IDeploymentJobRegistry>(services => services.GetRequiredService<DeploymentJobService>());
+builder.Services.AddScoped<IDeploymentService, DeploymentService>();
 builder.Services.AddMemoryCache(options => options.SizeLimit = 5_000);
 
 var app = builder.Build();
@@ -117,6 +124,7 @@ using (var scope = app.Services.CreateScope())
 {
     DatabaseInitializer.Initialize(scope.ServiceProvider.GetRequiredService<DevToolsDbContext>());
     LogIndexDatabaseInitializer.Initialize(scope.ServiceProvider.GetRequiredService<LogIndexDbContext>());
+    DeploymentService.MarkInterrupted(scope.ServiceProvider.GetRequiredService<DevToolsDbContext>());
 }
 
 // Establish the deployment base path before diagnostics, static files, routing, and authentication.

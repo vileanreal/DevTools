@@ -20,6 +20,7 @@ public interface ISqlDocService
     Task<bool> DeleteSourceAsync(int id, CancellationToken cancellationToken);
     Task<IReadOnlyList<string>> ListDatabasesAsync(SqlDocConnectionRequest request, CancellationToken cancellationToken);
     Task<SqlDocSchema?> InspectAsync(int id, CancellationToken cancellationToken);
+    Task<int> ExecuteCommandsAsync(int id, IReadOnlyList<string> commands, CancellationToken cancellationToken);
     Task<(byte[] Content, string FileName)?> GenerateDocxAsync(int id, SqlDocGenerateRequest request, CancellationToken cancellationToken);
     Task<IReadOnlyList<SqlDocDiagramDto>> ListDiagramsAsync(int sourceId, CancellationToken cancellationToken);
     Task<SqlDocDiagramDto?> GetDiagramAsync(int sourceId, int diagramId, CancellationToken cancellationToken);
@@ -101,6 +102,38 @@ public sealed class SqlDocService(DevToolsDbContext database, IWebHostEnvironmen
     {
         var source = await database.SqlDocSources.AsNoTracking().SingleOrDefaultAsync(item => item.Id == id, cancellationToken);
         return source is null ? null : await ReadSchemaAsync(source, cancellationToken);
+    }
+
+    public async Task<int> ExecuteCommandsAsync(int id, IReadOnlyList<string> commands, CancellationToken cancellationToken)
+    {
+        var source = await database.SqlDocSources.AsNoTracking().SingleOrDefaultAsync(item => item.Id == id, cancellationToken)
+            ?? throw new KeyNotFoundException("Database connection not found.");
+        if (commands.Count == 0) return 0;
+        await using var connection = source.Provider.Equals("sqlite", StringComparison.OrdinalIgnoreCase)
+            ? new SqliteConnection(NormalizeSqliteConnectionString(source.ConnectionString))
+            : CreateProviderConnection(source.Provider, source.ConnectionString);
+        await connection.OpenAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        try
+        {
+            var executed = 0;
+            foreach (var sql in commands.Where(command => !string.IsNullOrWhiteSpace(command)))
+            {
+                await using var command = connection.CreateCommand();
+                command.Transaction = transaction;
+                command.CommandTimeout = 120;
+                command.CommandText = sql;
+                await command.ExecuteNonQueryAsync(cancellationToken);
+                executed++;
+            }
+            await transaction.CommitAsync(cancellationToken);
+            return executed;
+        }
+        catch
+        {
+            await transaction.RollbackAsync(CancellationToken.None);
+            throw;
+        }
     }
 
     public async Task<(byte[] Content, string FileName)?> GenerateDocxAsync(int id, SqlDocGenerateRequest request, CancellationToken cancellationToken)
@@ -441,9 +474,12 @@ public sealed class SqlDocService(DevToolsDbContext database, IWebHostEnvironmen
         ? "SELECT owner AS schema_name, view_name AS name, text AS definition FROM all_views WHERE owner NOT IN ('SYS','SYSTEM') ORDER BY owner, view_name"
         : "SELECT table_schema AS schema_name, table_name AS name, view_definition AS definition FROM information_schema.views WHERE table_schema NOT IN ('information_schema','pg_catalog') ORDER BY table_schema, table_name";
 
-    private static string InformationSchemaRoutinesSql(string provider) => provider.Equals("oracle", StringComparison.OrdinalIgnoreCase)
-        ? "SELECT owner AS schema_name, object_name AS name, object_type AS routine_type, NULL AS definition FROM all_objects WHERE object_type IN ('PROCEDURE','FUNCTION') AND owner NOT IN ('SYS','SYSTEM') ORDER BY owner, object_name"
-        : "SELECT routine_schema AS schema_name, routine_name AS name, routine_type AS routine_type, routine_definition AS definition FROM information_schema.routines WHERE routine_schema NOT IN ('information_schema','pg_catalog') ORDER BY routine_schema, routine_name";
+    private static string InformationSchemaRoutinesSql(string provider) => provider.ToLowerInvariant() switch
+    {
+        "sqlserver" => "SELECT SCHEMA_NAME(obj.schema_id) AS schema_name, obj.name AS name, CASE WHEN obj.type IN ('P','PC') THEN 'PROCEDURE' ELSE 'FUNCTION' END AS routine_type, mod.definition AS definition FROM sys.objects obj LEFT JOIN sys.sql_modules mod ON mod.object_id = obj.object_id WHERE obj.type IN ('P','PC','FN','IF','TF','FS','FT') AND obj.is_ms_shipped = 0 ORDER BY SCHEMA_NAME(obj.schema_id), obj.name",
+        "oracle" => "SELECT owner AS schema_name, object_name AS name, object_type AS routine_type, NULL AS definition FROM all_objects WHERE object_type IN ('PROCEDURE','FUNCTION') AND owner NOT IN ('SYS','SYSTEM') ORDER BY owner, object_name",
+        _ => "SELECT routine_schema AS schema_name, routine_name AS name, routine_type AS routine_type, routine_definition AS definition FROM information_schema.routines WHERE routine_schema NOT IN ('information_schema','pg_catalog') ORDER BY routine_schema, routine_name"
+    };
 
     private static string InformationSchemaIndexesSql(string provider) => provider.ToLowerInvariant() switch
     {

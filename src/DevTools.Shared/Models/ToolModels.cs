@@ -16,9 +16,9 @@ public sealed record LogLevelCount(string Level, int Count);
 public sealed record LogParseResult(IReadOnlyList<LogEntry> Entries, int TotalCount, int FilteredCount, IReadOnlyList<LogLevelCount> Statistics, int Page, int PageSize, int TotalPages);
 
 public sealed record CreateSystemRequest(string? Name);
-public sealed record CreateLogSourceRequest(string? ModuleName, string? Path, string Format = "auto", string? CustomPattern = null, string? TimestampFormat = null, bool IncludeSubdirectories = true);
-public sealed record UpdateLogSourceRequest(string? ModuleName, string? Path, string Format = "auto", string? CustomPattern = null, string? TimestampFormat = null, bool IncludeSubdirectories = true);
-public sealed record LogSourceDto(int Id, string ModuleName, string Path, string Format, string? CustomPattern, string? TimestampFormat, bool IncludeSubdirectories);
+public sealed record CreateLogSourceRequest(string? ModuleName, string? Path, string Format = "auto", string? CustomPattern = null, string? TimestampFormat = null, bool IncludeSubdirectories = true, string? FileNameFilter = null);
+public sealed record UpdateLogSourceRequest(string? ModuleName, string? Path, string Format = "auto", string? CustomPattern = null, string? TimestampFormat = null, bool IncludeSubdirectories = true, string? FileNameFilter = null);
+public sealed record LogSourceDto(int Id, string ModuleName, string Path, string Format, string? CustomPattern, string? TimestampFormat, bool IncludeSubdirectories, string? FileNameFilter);
 public sealed record LogSystemDto(int Id, string Name, IReadOnlyList<LogSourceDto> Sources);
 public sealed record LogRefreshStartResult(string JobId, string Status);
 public sealed record LogRefreshStatus(string JobId, int SystemId, int? SourceId, string Status, int FilesDiscovered, int FilesScanned, int FilesIndexed, int FilesUnchanged, int FilesRemoved, int FilesFailed, long EntriesIndexed, string? CurrentFile, DateTimeOffset StartedAt, DateTimeOffset? CompletedAt, string? Error);
@@ -141,6 +141,29 @@ public sealed record SqlDocForeignKey(string Name, string ColumnName, string Ref
 public sealed record SqlDocView(string Schema, string Name, string? Definition);
 public sealed record SqlDocRoutine(string Schema, string Name, string? Definition);
 public sealed record SqlDocIndex(string Schema, string TableName, string Name, bool IsUnique, IReadOnlyList<string> Columns);
+
+public sealed record DatabaseCompareRequest(int LeftSourceId, int RightSourceId);
+public sealed record DatabaseCompareApplyRequest(int LeftSourceId, int RightSourceId, IReadOnlyList<string>? ObjectKeys);
+public sealed record DatabaseCompareObject(
+    string Key,
+    string Type,
+    string Name,
+    string Status,
+    string LeftDefinition,
+    string RightDefinition,
+    string UpdateScript,
+    bool CanApply,
+    string? Note = null);
+public sealed record DatabaseCompareResult(
+    int LeftSourceId,
+    string LeftSourceName,
+    int RightSourceId,
+    string RightSourceName,
+    string TargetProvider,
+    IReadOnlyList<DatabaseCompareObject> Objects,
+    string UpdateScript,
+    string? Warning = null);
+public sealed record DatabaseCompareApplyResult(int AppliedObjects, int AppliedCommands, string Message);
 
 public sealed record ApiResult<T>(bool Success, T? Data = default, string? Error = null)
 {

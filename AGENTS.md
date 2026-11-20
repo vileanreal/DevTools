@@ -2,7 +2,7 @@
 
 ## Product
 
-DevTools is a privacy-friendly ASP.NET Core web application containing focused utilities for software developers. Current tools cover hashing, multi-language formatting, ad-hoc and indexed log analysis, database documentation/diagrams, and local system-service operations. Prefer utilities that work locally and do not persist user input unless the feature explicitly requires configuration.
+DevTools is a privacy-friendly ASP.NET Core web application containing focused utilities for software developers. Current tools cover hashing, multi-language formatting, ad-hoc and indexed log analysis, database documentation/diagrams, local system-service operations, and package deployment to local IIS sites and Windows services. Prefer utilities that work locally and do not persist user input unless the feature explicitly requires configuration.
 
 ## Technology
 
@@ -43,6 +43,9 @@ Dependencies point inward: Web -> Application -> Shared. Web may also reference 
 - System Logs indexing runs as a shared server-side background job. Leaving the page must not cancel it; concurrent users attach to the same per-system job and can view its progress.
 - Clearing a System Logs index runs as a shared background job, explicitly deletes indexed entries, checkpoints WAL, vacuums the index database, and removes/compacts any legacy index tables left in `devtools.db` from older builds. Index and clear jobs are mutually exclusive per system across concurrent users.
 - Each System Logs module persists a reader mode (`auto`, `text`, `json`, or `custom`). Custom regex readers require lowercase named `timestamp`, `level`, and `message` groups and must use a match timeout.
+- Deployment stores systems, modules (package folder name, target folder, optional app pool and Windows service, default exclusions) and package history in `devtools.db`. Packages are `.zip`/`.7z`, read and written with SharpCompress (no 7-Zip install). Uploads must stream to disk (`DisableFormValueModelBinding` + `MultipartReader`); never buffer a package in memory. Every upload requires a description, sent as a form field before the file. Each package keeps a `DeploymentEvents` history (uploaded, deploy started/outcome, rollback started/outcome, interrupted); record an event for every state change.
+- A deployment backs up first into one `mmddyyyy.7z` per run (only replaced files for partial updates, the whole folder for whole-package updates, plus `_deployment/manifest.json`), then stops every selected module's app pools/services, patches every module, and starts the ones that were running before. Never stop/patch/start per module. Excluded paths are never replaced, deleted or restored over. Deployments and rollbacks run as shared background jobs, one per system. Any in-place deployment can be rolled back while its backup exists (`DeploymentRollbackRules`); when a newer in-place deployment changed the same modules, show a warning before confirming instead of blocking.
+- Deployment targets must never be a drive root, DevTools' own content/base folder, or its working folder; validate every archive entry path (no absolute paths or `..`) and resolve writes inside the target root.
 - System Services stores only logical system/service configuration in `devtools.db`. It controls services on the local Windows host only; start, stop, and restart are explicit user actions, serialized per target, and may require administrator permission.
 - Prefer built-in framework functionality. Add NuGet packages only when they remove substantial, well-tested complexity.
 - Keep JavaScript framework-free unless application complexity clearly justifies a change.

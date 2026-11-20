@@ -1,0 +1,131 @@
+<div class="deploy-page">
+<div class="tool-heading compact-tool-heading deploy-heading">
+    <div><span class="eyebrow">RELEASE OPERATIONS</span><h1>Deployment</h1><p>Deploy release packages to IIS web apps and Windows services, with automatic backups, live progress and one-click rollback.</p></div>
+    <span class="badge-soft">Local machine · Windows</span>
+</div>
+
+<section id="deploy-systems-view" class="content-section">
+    <div class="section-heading">
+        <div><h2>Systems</h2><p>A system groups the modules (web apps and Windows services) that you deploy together.</p></div>
+        <button id="deploy-system-add" class="btn btn-primary" type="button"><span aria-hidden="true">＋</span> Add system</button>
+    </div>
+    <div id="deploy-system-list" class="system-list-rows"><div class="empty-state">Loading systems…</div></div>
+</section>
+
+<section id="deploy-system-detail" class="deploy-detail d-none">
+    <div class="deploy-detail-bar">
+        <button id="deploy-system-back" class="btn btn-sm btn-ghost" type="button" title="All systems" aria-label="All systems">←</button>
+        <div class="deploy-detail-title"><h2 id="deploy-system-name"></h2></div>
+        <button id="deploy-modules-manage" class="btn btn-sm deploy-btn-modules" type="button">Manage modules <span id="deploy-modules-count" class="deploy-count-badge">0</span></button>
+        <button id="deploy-system-edit" class="btn btn-sm btn-outline-primary" type="button">Edit system</button>
+        <button id="deploy-system-delete" class="btn btn-sm btn-ghost text-danger" type="button">Delete</button>
+    </div>
+
+    <div id="deploy-layout" class="deploy-layout deploy-layout-single">
+            <section class="deploy-card deploy-upload-section">
+                <div class="deploy-card-head"><h3>Upload package</h3><span>.zip or .7z · one folder per module</span></div>
+                <label id="deploy-dropzone" class="deploy-dropzone" for="deploy-file">
+                    <input id="deploy-file" type="file" accept=".zip,.7z" class="visually-hidden">
+                    <span class="deploy-dropzone-icon" aria-hidden="true">⇪</span>
+                    <span><strong>Drop a package or <span class="deploy-link">choose a file</span></strong><small>Streamed to the server; never held in memory.</small></span>
+                </label>
+                <form id="deploy-upload-form" class="deploy-upload-form d-none" novalidate>
+                    <div class="deploy-staged">
+                        <span class="deploy-package-icon" id="deploy-staged-icon" aria-hidden="true">zip</span>
+                        <span class="deploy-staged-main"><strong id="deploy-staged-name"></strong><small id="deploy-staged-size"></small></span>
+                        <button id="deploy-staged-clear" class="btn btn-sm btn-ghost" type="button">Change</button>
+                    </div>
+                    <label class="field-label" for="deploy-upload-description">Package description <span class="text-danger">*</span></label>
+                    <textarea id="deploy-upload-description" class="form-control" rows="1" maxlength="500" required placeholder="Package description (required), e.g. Release 2.4 — invoice export fix"></textarea>
+                    <div class="deploy-upload-footer"><span id="deploy-upload-counter" class="form-text">0 / 500</span><button id="deploy-upload-submit" class="btn btn-sm btn-primary" type="submit" disabled>Upload</button></div>
+                </form>
+                <div id="deploy-upload-progress" class="deploy-upload-progress d-none">
+                    <div class="deploy-upload-meta"><strong id="deploy-upload-name"></strong><span id="deploy-upload-stats"></span></div>
+                    <div class="progress" role="progressbar" aria-label="Upload progress" aria-valuemin="0" aria-valuemax="100"><div id="deploy-upload-bar" class="progress-bar" style="width:0%"></div></div>
+                    <div class="deploy-upload-actions"><span id="deploy-upload-phase"></span><button id="deploy-upload-cancel" class="btn btn-sm btn-ghost" type="button">Cancel</button></div>
+                </div>
+            </section>
+            <div id="deploy-no-modules" class="deploy-no-modules d-none">This system has no modules yet. <button id="deploy-no-modules-add" class="btn btn-sm btn-primary" type="button">＋ Add module</button></div>
+            <section id="deploy-job" class="deploy-card deploy-job d-none" aria-live="polite"></section>
+            <section class="deploy-card">
+                <div class="deploy-card-head"><h3>Packages</h3><span>Newest first · any deployed package can be rolled back</span></div>
+                <div id="deploy-package-list" class="deploy-package-list"><div class="empty-state">No packages uploaded yet.</div></div>
+                <nav id="deploy-package-pager" class="deploy-pager d-none" aria-label="Packages pages"></nav>
+            </section>
+    </div>
+</section>
+</div>
+
+<div class="modal fade" id="deploySystemModal" tabindex="-1" aria-labelledby="deploy-system-modal-title" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered"><form id="deploy-system-form" class="modal-content">
+        <div class="modal-header"><div><h5 class="modal-title" id="deploy-system-modal-title">Add system</h5><p class="modal-subtitle">Use a product or environment name.</p></div><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
+        <div class="modal-body service-form-fields">
+            <div><label class="field-label" for="deploy-system-name-input">System name</label><input id="deploy-system-name-input" class="form-control" maxlength="120" required placeholder="e.g. Order Platform"></div>
+            <div><label class="field-label" for="deploy-system-backup-input">Backup folder <span class="text-muted fw-normal">(optional)</span></label><input id="deploy-system-backup-input" class="form-control" maxlength="2048" placeholder="e.g. C:\Backups\MyApp"><div id="deploy-system-backup-help" class="form-text">Backups are saved here as mmddyyyy.7z. Leave empty to use DevTools' deployments folder.</div></div>
+            <div><label class="field-label" for="deploy-system-package-input">Package folder <span class="text-muted fw-normal">(optional)</span></label><input id="deploy-system-package-input" class="form-control" maxlength="2048" placeholder="e.g. C:\Packages\MyApp"><div class="form-text">Uploaded packages for this system are stored here. Leave empty to use DevTools' deployments folder. Both folders must be outside every module folder.</div></div>
+        </div>
+        <div class="modal-footer"><button type="button" class="btn btn-ghost" data-bs-dismiss="modal">Cancel</button><button id="deploy-system-submit" class="btn btn-primary" type="submit">Add system</button></div>
+    </form></div>
+</div>
+
+<div class="modal fade" id="deployModuleModal" tabindex="-1" aria-labelledby="deploy-module-modal-title" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered"><form id="deploy-module-form" class="modal-content">
+        <div class="modal-header"><div><h5 class="modal-title" id="deploy-module-modal-title">Add module</h5><p class="modal-subtitle">The module name must match its folder name inside the package.</p></div><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
+        <div class="modal-body deploy-module-form">
+            <div><label class="field-label" for="deploy-module-name">Module name (package folder)</label><input id="deploy-module-name" class="form-control" maxlength="120" required placeholder="e.g. WebApi"></div>
+            <div><label class="field-label" for="deploy-module-target">Target folder</label><input id="deploy-module-target" class="form-control" maxlength="2048" required placeholder="e.g. C:\inetpub\OrderPlatform\WebApi"></div>
+            <div><label class="field-label" for="deploy-module-apppool">IIS app pool <span class="text-muted fw-normal">(optional)</span></label><input id="deploy-module-apppool" class="form-control" maxlength="260" placeholder="e.g. OrderPlatformApi"></div>
+            <div><label class="field-label" for="deploy-module-service">Windows service name <span class="text-muted fw-normal">(optional)</span></label><input id="deploy-module-service" class="form-control" maxlength="260" placeholder="e.g. OrderWorker"><div class="form-text">The service name from its Windows properties, not the display name.</div></div>
+            <div class="deploy-span-2"><label class="field-label" for="deploy-module-exclusions">Default files to exclude <span class="text-muted fw-normal">(optional)</span></label><textarea id="deploy-module-exclusions" class="form-control code-input" rows="4" maxlength="4000" spellcheck="false" placeholder="web.config&#10;appsettings.Production.json&#10;logs/&#10;App_Data/**"></textarea><div class="form-text">One pattern per line, relative to the module folder. A name matches at any depth, <code>*</code> and <code>?</code> are wildcards, a trailing <code>/</code> means a folder, and <code>**</code> spans folders. Excluded files are never replaced or deleted. You can change these for each deployment.</div></div>
+        </div>
+        <div class="modal-footer"><button type="button" class="btn btn-ghost" data-bs-dismiss="modal">Cancel</button><button id="deploy-module-submit" class="btn btn-primary" type="submit">Add module</button></div>
+    </form></div>
+</div>
+
+<div class="modal fade" id="deployRunModal" tabindex="-1" aria-labelledby="deploy-run-title" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable"><form id="deploy-run-form" class="modal-content">
+        <div class="modal-header"><div><h5 class="modal-title" id="deploy-run-title">Deploy package</h5><p id="deploy-run-subtitle" class="modal-subtitle"></p></div><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
+        <div class="modal-body">
+            <ol class="deploy-run-flow" aria-label="What will happen">
+                <li>Back up</li><li>Stop all app pools and services</li><li>Patch all modules</li><li>Start them again</li>
+            </ol>
+            <div id="deploy-run-modules" class="deploy-run-modules"></div>
+            <div class="deploy-run-options">
+                <label class="form-check"><input id="deploy-run-autorestore" class="form-check-input" type="checkbox" checked> <span class="form-check-label"><strong>Auto-restore on failure</strong><small>If any step fails, restore every module from the backup and start the services again.</small></span></label>
+            </div>
+        </div>
+        <div class="modal-footer deploy-run-footer"><span id="deploy-run-summary" class="deploy-run-warning d-none" role="status"><span class="deploy-run-warning-icon" aria-hidden="true">⚠</span><span id="deploy-run-summary-text"></span></span><button type="button" class="btn btn-ghost" data-bs-dismiss="modal">Cancel</button><button id="deploy-run-submit" class="btn btn-danger" type="submit" disabled>Deploy</button></div>
+    </form></div>
+</div>
+
+<div class="modal fade" id="deployRollbackModal" tabindex="-1" aria-labelledby="deploy-rollback-title" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered"><form id="deploy-rollback-form" class="modal-content">
+        <div class="modal-header"><h5 class="modal-title" id="deploy-rollback-title">Roll back deployment?</h5><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
+        <div class="modal-body"><p id="deploy-rollback-text"></p><div id="deploy-rollback-warning" class="deploy-rollback-warning d-none" role="alert"></div><p class="text-danger small mb-2">This stops the app pools and services, restores the backed-up files, removes files the deployment added, and starts them again.</p><label class="form-label" for="deploy-rollback-confirm">Type <strong>ROLLBACK</strong> to continue</label><input id="deploy-rollback-confirm" class="form-control" autocomplete="off"></div>
+        <div class="modal-footer"><button type="button" class="btn btn-ghost" data-bs-dismiss="modal">Cancel</button><button id="deploy-rollback-submit" type="submit" class="btn btn-danger" disabled>Roll back</button></div>
+    </form></div>
+</div>
+
+<div class="modal fade" id="deployPackageModal" tabindex="-1" aria-labelledby="deploy-package-title" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable"><div class="modal-content">
+        <div class="modal-header"><div class="deploy-details-heading"><h5 class="modal-title" id="deploy-package-title"></h5><p id="deploy-package-subtitle" class="modal-subtitle"></p></div><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
+        <div id="deploy-package-body" class="modal-body deploy-details"></div>
+        <div class="modal-footer"><div id="deploy-package-actions" class="deploy-row-actions me-auto"></div><button type="button" class="btn btn-ghost" data-bs-dismiss="modal">Close</button></div>
+    </div></div>
+</div>
+
+<div class="modal fade" id="deployUploadConfirmModal" tabindex="-1" aria-labelledby="deploy-upload-confirm-title" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered"><div class="modal-content">
+        <div class="modal-header"><h5 class="modal-title" id="deploy-upload-confirm-title">Upload another package?</h5><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
+        <div class="modal-body"><p id="deploy-upload-confirm-text" class="mb-2"></p><ul id="deploy-upload-confirm-list" class="deploy-confirm-list"></ul></div>
+        <div class="modal-footer"><button type="button" class="btn btn-ghost" data-bs-dismiss="modal">Cancel</button><button id="deploy-upload-confirm-submit" type="button" class="btn btn-primary">Upload anyway</button></div>
+    </div></div>
+</div>
+
+<div class="modal fade" id="deployModulesModal" tabindex="-1" aria-labelledby="deploy-modules-title" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable"><div class="modal-content">
+        <div class="modal-header"><div><h5 class="modal-title" id="deploy-modules-title">Manage modules</h5><p class="modal-subtitle">Each module maps a package folder to a target folder and the app pool or service to stop.</p></div><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
+        <div class="modal-body"><div id="deploy-module-list" class="deploy-module-list"></div></div>
+        <div class="modal-footer"><button id="deploy-module-add" class="btn btn-primary me-auto" type="button">＋ Add module</button><button type="button" class="btn btn-ghost" data-bs-dismiss="modal">Close</button></div>
+    </div></div>
+</div>

@@ -7,10 +7,11 @@ namespace DevTools.Web.Data;
 
 public static class DatabaseInitializer
 {
-    private const int CurrentSchemaVersion = 1;
+    private const int CurrentSchemaVersion = 5;
     private static readonly string[] ApplicationTables =
     [
-        "LogSystems", "LogSources", "SqlDocSources", "SqlDocDiagrams", "ServiceSystems", "ManagedServices"
+        "LogSystems", "LogSources", "SqlDocSources", "SqlDocDiagrams", "ServiceSystems", "ManagedServices",
+        "DeploymentSystems", "DeploymentModules", "DeploymentPackages", "DeploymentEvents"
     ];
 
     public static void Initialize(DevToolsDbContext database)
@@ -37,6 +38,7 @@ public static class DatabaseInitializer
         {
             CreateCurrentSchema(connection, transaction);
             AddMissingLogSourceColumns(connection, transaction);
+            AddMissingDeploymentColumns(connection, transaction);
             CreateCurrentIndexes(connection, transaction);
             SetSchemaVersion(connection, transaction, CurrentSchemaVersion);
             transaction.Commit();
@@ -65,6 +67,7 @@ public static class DatabaseInitializer
                 CustomPattern TEXT NULL,
                 TimestampFormat TEXT NULL,
                 IncludeSubdirectories INTEGER NOT NULL DEFAULT 1,
+                FileNameFilter TEXT NULL,
                 LogSystemId INTEGER NOT NULL,
                 CONSTRAINT FK_LogSources_LogSystems_LogSystemId FOREIGN KEY (LogSystemId) REFERENCES LogSystems (Id) ON DELETE CASCADE
             )
@@ -107,6 +110,55 @@ public static class DatabaseInitializer
             )
             """, transaction);
         Execute(connection, """
+            CREATE TABLE IF NOT EXISTS DeploymentSystems (
+                Id INTEGER NOT NULL CONSTRAINT PK_DeploymentSystems PRIMARY KEY AUTOINCREMENT,
+                Name TEXT NOT NULL,
+                BackupDirectory TEXT NULL,
+                PackageDirectory TEXT NULL
+            )
+            """, transaction);
+        Execute(connection, """
+            CREATE TABLE IF NOT EXISTS DeploymentModules (
+                Id INTEGER NOT NULL CONSTRAINT PK_DeploymentModules PRIMARY KEY AUTOINCREMENT,
+                DeploymentSystemId INTEGER NOT NULL,
+                Name TEXT NOT NULL,
+                TargetPath TEXT NOT NULL,
+                AppPoolName TEXT NULL,
+                ServiceName TEXT NULL,
+                DefaultExclusions TEXT NULL,
+                CONSTRAINT FK_DeploymentModules_DeploymentSystems_DeploymentSystemId FOREIGN KEY (DeploymentSystemId) REFERENCES DeploymentSystems (Id) ON DELETE CASCADE
+            )
+            """, transaction);
+        Execute(connection, """
+            CREATE TABLE IF NOT EXISTS DeploymentPackages (
+                Id INTEGER NOT NULL CONSTRAINT PK_DeploymentPackages PRIMARY KEY AUTOINCREMENT,
+                DeploymentSystemId INTEGER NOT NULL,
+                FileName TEXT NOT NULL,
+                Description TEXT NULL,
+                StoredPath TEXT NOT NULL,
+                SizeBytes INTEGER NOT NULL,
+                UploadedAtUtc TEXT NOT NULL,
+                Status TEXT NOT NULL,
+                AnalysisJson TEXT NOT NULL,
+                BackupPath TEXT NULL,
+                ManifestJson TEXT NULL,
+                DeployedAtUtc TEXT NULL,
+                RolledBackAtUtc TEXT NULL,
+                Error TEXT NULL,
+                CONSTRAINT FK_DeploymentPackages_DeploymentSystems_DeploymentSystemId FOREIGN KEY (DeploymentSystemId) REFERENCES DeploymentSystems (Id) ON DELETE CASCADE
+            )
+            """, transaction);
+        Execute(connection, """
+            CREATE TABLE IF NOT EXISTS DeploymentEvents (
+                Id INTEGER NOT NULL CONSTRAINT PK_DeploymentEvents PRIMARY KEY AUTOINCREMENT,
+                DeploymentPackageId INTEGER NOT NULL,
+                Kind TEXT NOT NULL,
+                AtUtc TEXT NOT NULL,
+                Detail TEXT NULL,
+                CONSTRAINT FK_DeploymentEvents_DeploymentPackages_DeploymentPackageId FOREIGN KEY (DeploymentPackageId) REFERENCES DeploymentPackages (Id) ON DELETE CASCADE
+            )
+            """, transaction);
+        Execute(connection, """
             CREATE TABLE IF NOT EXISTS DevToolsSchema (
                 Id INTEGER NOT NULL CONSTRAINT PK_DevToolsSchema PRIMARY KEY CHECK (Id = 1),
                 Version INTEGER NOT NULL,
@@ -122,6 +174,14 @@ public static class DatabaseInitializer
         if (!columns.Contains("CustomPattern")) Execute(connection, "ALTER TABLE LogSources ADD COLUMN CustomPattern TEXT NULL", transaction);
         if (!columns.Contains("TimestampFormat")) Execute(connection, "ALTER TABLE LogSources ADD COLUMN TimestampFormat TEXT NULL", transaction);
         if (!columns.Contains("IncludeSubdirectories")) Execute(connection, "ALTER TABLE LogSources ADD COLUMN IncludeSubdirectories INTEGER NOT NULL DEFAULT 1", transaction);
+        if (!columns.Contains("FileNameFilter")) Execute(connection, "ALTER TABLE LogSources ADD COLUMN FileNameFilter TEXT NULL", transaction);
+    }
+
+    private static void AddMissingDeploymentColumns(DbConnection connection, DbTransaction transaction)
+    {
+        var columns = Columns(connection, transaction, "DeploymentSystems");
+        if (!columns.Contains("PackageDirectory")) Execute(connection, "ALTER TABLE DeploymentSystems ADD COLUMN PackageDirectory TEXT NULL", transaction);
+        if (!Columns(connection, transaction, "DeploymentPackages").Contains("Description")) Execute(connection, "ALTER TABLE DeploymentPackages ADD COLUMN Description TEXT NULL", transaction);
     }
 
     private static void CreateCurrentIndexes(DbConnection connection, DbTransaction transaction)
@@ -132,14 +192,20 @@ public static class DatabaseInitializer
         Execute(connection, "CREATE UNIQUE INDEX IF NOT EXISTS IX_SqlDocDiagrams_SqlDocSourceId_Name ON SqlDocDiagrams (SqlDocSourceId, Name)", transaction);
         Execute(connection, "CREATE UNIQUE INDEX IF NOT EXISTS IX_ServiceSystems_Name ON ServiceSystems (Name)", transaction);
         Execute(connection, "CREATE UNIQUE INDEX IF NOT EXISTS IX_ManagedServices_ServiceSystemId_Name ON ManagedServices (ServiceSystemId, Name)", transaction);
+        Execute(connection, "CREATE UNIQUE INDEX IF NOT EXISTS IX_DeploymentSystems_Name ON DeploymentSystems (Name)", transaction);
+        Execute(connection, "CREATE UNIQUE INDEX IF NOT EXISTS IX_DeploymentModules_DeploymentSystemId_Name ON DeploymentModules (DeploymentSystemId, Name)", transaction);
+        Execute(connection, "CREATE INDEX IF NOT EXISTS IX_DeploymentPackages_DeploymentSystemId_UploadedAtUtc ON DeploymentPackages (DeploymentSystemId, UploadedAtUtc)", transaction);
+        Execute(connection, "CREATE INDEX IF NOT EXISTS IX_DeploymentEvents_DeploymentPackageId_AtUtc ON DeploymentEvents (DeploymentPackageId, AtUtc)", transaction);
     }
 
     private static bool RequiresSchemaRepair(DbConnection connection)
     {
         if (ApplicationTables.Any(table => !TableExists(connection, table))) return true;
         var columns = Columns(connection, null, "LogSources");
-        string[] requiredColumns = ["Format", "CustomPattern", "TimestampFormat", "IncludeSubdirectories"];
-        return requiredColumns.Any(column => !columns.Contains(column));
+        string[] requiredColumns = ["Format", "CustomPattern", "TimestampFormat", "IncludeSubdirectories", "FileNameFilter"];
+        if (requiredColumns.Any(column => !columns.Contains(column))) return true;
+        return !Columns(connection, null, "DeploymentSystems").Contains("PackageDirectory")
+            || !Columns(connection, null, "DeploymentPackages").Contains("Description");
     }
 
     private static int GetSchemaVersion(DbConnection connection)

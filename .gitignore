@@ -25,6 +25,7 @@
 *.log
 .DS_Store
 src/DevTools.Web/sample-logs/
+src/DevTools.Web/deployments/
 
 # Local configuration overrides and secrets
 .env

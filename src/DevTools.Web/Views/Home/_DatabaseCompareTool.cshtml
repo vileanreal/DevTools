@@ -1,0 +1,95 @@
+<div class="db-compare-page">
+<header class="db-compare-toolbar">
+    <div class="db-compare-title">
+        <nav class="db-compare-crumbs" aria-label="Breadcrumb"><a asp-action="Index">Home</a><span aria-hidden="true">›</span><span aria-current="page">Database Compare</span></nav>
+        <h1>Compare database schemas</h1>
+    </div>
+    <div class="db-compare-setup">
+        <div class="dc-field">
+            <label for="db-compare-left" title="Desired schema">Left</label>
+            <select id="db-compare-left" class="form-select" title="Desired schema (left)"><option value="">Choose a saved connection</option></select>
+        </div>
+        <button id="db-compare-swap" class="dc-btn dc-btn-icon" type="button" title="Swap databases" aria-label="Swap databases">⇄</button>
+        <div class="dc-field">
+            <label for="db-compare-right" title="Database to update">Right</label>
+            <select id="db-compare-right" class="form-select" title="Database to update (right)"><option value="">Choose a saved connection</option></select>
+        </div>
+        <button id="db-compare-run" class="dc-btn dc-btn-primary" type="button">Compare</button>
+        <button id="db-compare-add-source" class="dc-btn" type="button" title="Save a database connection">+ Connection</button>
+    </div>
+    <div class="db-compare-view-controls" role="group" aria-label="Layout">
+        <div class="dc-segmented" role="radiogroup" aria-label="Split direction">
+            <button type="button" class="dc-btn dc-btn-icon" data-compare-orientation="horizontal" role="radio" title="Side by side" aria-label="Side by side"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M8 2.5v11"/></svg></button>
+            <button type="button" class="dc-btn dc-btn-icon" data-compare-orientation="vertical" role="radio" title="Stacked" aria-label="Stacked"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M1.5 8h13"/></svg></button>
+        </div>
+        <div class="dc-segmented" aria-label="Visible sections">
+            <button type="button" class="dc-btn" data-compare-toggle="list" aria-pressed="true" title="Show or hide the list of changes">Changes</button>
+            <button type="button" class="dc-btn" data-compare-toggle="detail" aria-pressed="true" title="Show or hide the comparison">Comparison</button>
+        </div>
+    </div>
+</header>
+
+<section id="db-compare-results" class="db-compare-workspace d-none" data-orientation="horizontal">
+    <aside class="db-compare-pane db-compare-list-pane" data-compare-pane="list" aria-label="Schema differences">
+        <div class="dc-pane-bar">
+            <strong>Changes</strong><span id="db-compare-summary" class="dc-pane-meta"></span>
+            <button type="button" class="dc-btn dc-btn-icon dc-btn-quiet dc-pane-hide" data-compare-hide="list" title="Hide changes" aria-label="Hide changes">✕</button>
+        </div>
+        <div class="dc-pane-bar dc-pane-subbar">
+            <input id="db-compare-search" class="form-control" placeholder="Filter objects…" aria-label="Filter objects">
+            <label class="db-compare-select-all"><input id="db-compare-select-all" class="form-check-input" type="checkbox" checked> All applicable</label>
+        </div>
+        <div id="db-compare-object-list" class="db-compare-object-list"></div>
+    </aside>
+
+    <div class="db-compare-splitter" role="separator" tabindex="0" aria-label="Resize sections" aria-orientation="vertical" aria-valuemin="20" aria-valuemax="80" aria-valuenow="50" title="Drag to resize · double-click to reset"><span></span></div>
+
+    <section class="db-compare-pane db-compare-detail-pane" data-compare-pane="detail">
+        <div class="dc-pane-bar db-compare-tabs" role="tablist">
+            <button type="button" class="db-compare-tab active" role="tab" data-compare-tab="diff">Comparison</button>
+            <button type="button" class="db-compare-tab" role="tab" data-compare-tab="object-sql">Object SQL</button>
+            <button type="button" class="db-compare-tab" role="tab" data-compare-tab="script">Update script <span id="db-compare-selected-count" class="db-compare-badge">0</span></button>
+            <button id="db-compare-update" class="dc-btn dc-btn-danger db-compare-update" type="button">Update right database</button>
+            <button type="button" class="dc-btn dc-btn-icon dc-btn-quiet dc-pane-hide" data-compare-hide="detail" title="Hide comparison" aria-label="Hide comparison">✕</button>
+        </div>
+        <div id="db-compare-diff" class="db-compare-panel db-compare-diff" data-compare-panel="diff"><div class="empty-state">Select an object to compare definitions.</div></div>
+        <div class="db-compare-panel db-compare-script d-none" data-compare-panel="object-sql">
+            <div id="db-compare-selected-script-title" class="dc-pane-bar dc-pane-subbar db-compare-script-title">No object selected</div>
+            <pre id="db-compare-selected-script-code" class="syntax-code" aria-label="Selected object SQL update script"></pre>
+        </div>
+        <div class="db-compare-panel db-compare-script d-none" data-compare-panel="script">
+            <div class="dc-pane-bar dc-pane-subbar">
+                <button id="db-compare-generate-script" class="dc-btn dc-btn-primary" type="button">Generate SQL</button>
+                <button id="db-compare-copy-script" class="dc-btn" type="button" disabled>Copy</button>
+                <button id="db-compare-download-script" class="dc-btn" type="button" disabled>Download</button>
+                <span class="dc-pane-meta">Script for every checked object. Regenerate after changing the selection.</span>
+            </div>
+            <pre id="db-compare-script-code" class="syntax-code" aria-label="Generated SQL update script">-- Click Generate SQL to build the update script for all checked objects.</pre>
+        </div>
+    </section>
+</section>
+
+<section id="db-compare-empty" class="db-compare-empty"><div class="empty-state">Choose two saved database connections, then click Compare.</div></section>
+</div>
+
+<div class="modal fade" id="db-compare-source-modal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <form id="db-compare-source-form" class="modal-content">
+            <div class="modal-header"><div><h5 class="modal-title">Save database connection</h5><p class="modal-subtitle">Connections are shared with SQL Doc.</p></div><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+            <div class="modal-body"><div class="row g-3">
+                <div class="col-md-5"><label class="form-label" for="db-source-name">Connection name</label><input id="db-source-name" class="form-control" maxlength="120" required></div>
+                <div class="col-md-7"><label class="form-label" for="db-source-provider">Provider</label><select id="db-source-provider" class="form-select"><option value="sqlserver">SQL Server</option><option value="sqlite">SQLite</option><option value="mysql">MySQL</option><option value="oracle">Oracle</option><option value="postgresql">PostgreSQL</option></select></div>
+                <div class="col-12"><label class="form-label" for="db-source-connection">Connection string or SQLite path</label><textarea id="db-source-connection" class="form-control sql-connection-input" rows="4" maxlength="4000" required placeholder="Data Source=/data/app.db"></textarea><div class="form-text">For SQLite, a file path is accepted. Other providers require a complete connection string.</div></div>
+            </div></div>
+            <div class="modal-footer"><button type="button" class="btn btn-ghost" data-bs-dismiss="modal">Cancel</button><button class="btn btn-primary" type="submit">Save connection</button></div>
+        </form>
+    </div>
+</div>
+
+<div class="modal fade" id="db-compare-update-modal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered"><div class="modal-content">
+        <div class="modal-header"><h5 class="modal-title">Update the right database?</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+        <div class="modal-body"><p id="db-compare-update-warning"></p><p class="text-danger mb-2">This executes schema-changing SQL against the right database. Back it up first.</p><label class="form-label" for="db-compare-confirm">Type <strong>UPDATE</strong> to continue</label><input id="db-compare-confirm" class="form-control" autocomplete="off"></div>
+        <div class="modal-footer"><button type="button" class="btn btn-ghost" data-bs-dismiss="modal">Cancel</button><button id="db-compare-confirm-update" type="button" class="btn btn-danger" disabled>Update right database</button></div>
+    </div></div>
+</div>

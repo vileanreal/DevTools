@@ -11,7 +11,9 @@
     <script type="importmap"></script>
     <script>
         (() => {
-            const theme = localStorage.getItem('devtools-theme') || 'light';
+            // Light by default, whatever the OS uses; dark only when the user picked it (saved in localStorage).
+            let theme = 'light';
+            try { if (localStorage.getItem('devtools-theme') === 'dark') theme = 'dark'; } catch { /* storage blocked */ }
             document.documentElement.dataset.theme = theme;
             document.documentElement.dataset.bsTheme = theme;
         })();

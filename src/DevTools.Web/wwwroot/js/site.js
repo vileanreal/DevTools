@@ -116,6 +116,12 @@
     themeToggle.setAttribute('aria-label', `Switch to ${dark ? 'light' : 'dark'} theme`);
     themeToggle.setAttribute('aria-pressed', String(dark));
   };
-  applyTheme(localStorage.getItem('devtools-theme') || 'light');
-  themeToggle?.addEventListener('click', () => { const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'; localStorage.setItem('devtools-theme', next); applyTheme(next); });
+  // Light by default regardless of the OS setting; dark only when the user chose it. The choice lives in localStorage.
+  const savedTheme = () => { try { return localStorage.getItem('devtools-theme') === 'dark' ? 'dark' : 'light'; } catch { return 'light'; } };
+  applyTheme(savedTheme());
+  themeToggle?.addEventListener('click', () => {
+    const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+    try { localStorage.setItem('devtools-theme', next); } catch { /* storage blocked: the choice lasts for this page only */ }
+    applyTheme(next);
+  });
 })();

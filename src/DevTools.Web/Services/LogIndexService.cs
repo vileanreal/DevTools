@@ -68,7 +68,7 @@ public sealed partial class LogIndexService(DevToolsDbContext database, LogIndex
             void Report(string? currentFile = null) => progress?.Report(new LogRefreshProgress(discovered, scanned, indexed, unchanged, removed, failed, entriesIndexed, currentFile));
             foreach (var source in sources)
             {
-                var paths = DiscoverFiles(source.Path, source.IncludeSubdirectories).ToList();
+                var paths = DiscoverFiles(source.Path, source.IncludeSubdirectories, LogFileNameFilter.Parse(source.FileNameFilter)).ToList();
                 discovered += paths.Count;
                 Report();
                 var found = paths.ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -505,13 +505,14 @@ public sealed partial class LogIndexService(DevToolsDbContext database, LogIndex
         var parameter = command.CreateParameter(); parameter.ParameterName = name; parameter.Value = value; command.Parameters.Add(parameter);
     }
 
-    private static IEnumerable<string> DiscoverFiles(string configuredPath, bool includeSubdirectories)
+    // A path to one file is always read as-is; the file-name filter applies only to folder modules.
+    private static IEnumerable<string> DiscoverFiles(string configuredPath, bool includeSubdirectories, LogFileNameFilter filter)
     {
         if (File.Exists(configuredPath)) { yield return configuredPath; yield break; }
         if (!Directory.Exists(configuredPath)) yield break;
         var options = new EnumerationOptions { RecurseSubdirectories = includeSubdirectories, IgnoreInaccessible = true, ReturnSpecialDirectories = false, AttributesToSkip = FileAttributes.ReparsePoint };
         foreach (var file in Directory.EnumerateFiles(configuredPath, "*", options))
-            if (SupportedExtensions.Contains(Path.GetExtension(file))) yield return Path.GetFullPath(file);
+            if (filter.IsMatch(Path.GetFileName(file), name => SupportedExtensions.Contains(Path.GetExtension(name)))) yield return Path.GetFullPath(file);
     }
 
     private static async Task<string> ComputeContentHashAsync(string path, CancellationToken cancellationToken)

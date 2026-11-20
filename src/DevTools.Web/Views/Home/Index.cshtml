@@ -2,46 +2,53 @@
 @using DevTools.Web.Models
 @inject Microsoft.Extensions.Options.IOptions<ToolOptions> ToolConfiguration
 @{
-    var tools = new[]
-    {
-        new { Key = "hash", Group = "Build & transform", Tone = "tone-1", Title = "Hash generator", Description = "Generate common hashes locally.", Icon = "#", Action = "Hash" },
-        new { Key = "formatter", Group = "Build & transform", Tone = "tone-2", Title = "Code formatter", Description = "Format SQL, C#, JSON, XML, HTML, and more.", Icon = "</>", Action = "Formatter" },
-        new { Key = "logs", Group = "Observe & operate", Tone = "tone-3", Title = "Logs viewer", Description = "Paste or upload logs for quick analysis.", Icon = "☷", Action = "Logs" },
-        new { Key = "system-logs", Group = "Observe & operate", Tone = "tone-4", Title = "System logs", Description = "Index, filter, chart, and inspect log folders.", Icon = "▦", Action = "SystemLogs" },
-        new { Key = "system-services", Group = "Observe & operate", Tone = "tone-5", Title = "System Services", Description = "Monitor and control local services and IIS app pools.", Icon = "⚙", Action = "SystemServices" },
-        new { Key = "sql-doc", Group = "Database", Tone = "tone-6", Title = "SQL Doc", Description = "Inspect databases, export docs, and draw diagrams.", Icon = "DB", Action = "SqlDoc" }
-    }.Where(tool => ToolConfiguration.Value.IsEnabled(tool.Key)).ToArray();
+    var tools = ToolCatalog.Enabled(ToolConfiguration.Value);
 }
 
 <div class="app-shell no-sidebar">
     <main class="workspace">
         @if (Model == "home")
         {
-            <section class="office-home-hero">
-                <div class="office-home-mark" aria-hidden="true">DT</div>
-                <div><span class="eyebrow">LOCAL-FIRST DEVELOPER UTILITIES</span><h1>Home</h1><p>Choose a focused tool and keep your development workflow moving.</p></div>
-            </section>
-            @foreach (var group in tools.GroupBy(tool => tool.Group))
-            {
-                <section class="office-tool-section" aria-labelledby="tool-group-@group.Key.Replace(" ", "-").Replace("&", "and").ToLowerInvariant()">
-                    <div class="office-section-heading"><div><h2 id="tool-group-@group.Key.Replace(" ", "-").Replace("&", "and").ToLowerInvariant()">@group.Key</h2><span>Open a utility</span></div></div>
-                    <div class="office-tool-grid">
-                        @foreach (var tool in group)
-                        {
-                            <a class="office-tool-tile @tool.Tone" asp-action="@tool.Action">
-                                <span class="office-tool-icon" aria-hidden="true">@tool.Icon</span>
-                                <span class="office-tool-copy"><strong>@tool.Title</strong><small>@tool.Description</small></span>
-                            </a>
-                        }
+            <div class="home">
+                <header class="home-head">
+                    <div class="home-head-title">
+                        <h1>Tools <span class="home-count" title="Available tools">@tools.Count</span></h1>
+                        <p>Logs, services, deployments and database utilities for this server.</p>
                     </div>
-                </section>
-            }
+                    <label class="home-search">
+                        <span class="home-search-icon" aria-hidden="true">⌕</span>
+                        <input id="home-search" type="search" placeholder="Search tools…" aria-label="Search tools" autocomplete="off">
+                        <kbd aria-hidden="true">/</kbd>
+                    </label>
+                </header>
+                @foreach (var group in tools.GroupBy(tool => tool.Group))
+                {
+                    <section class="home-group" aria-label="@group.Key">
+                        <h2 class="home-group-title">@group.Key</h2>
+                        <div class="home-tool-grid">
+                            @foreach (var tool in group)
+                            {
+                                <a class="home-tool @tool.Tone" asp-action="@tool.Action" data-search="@($"{tool.Title} {tool.Description} {string.Join(' ', tool.Features)} {group.Key}".ToLowerInvariant())">
+                                    <span class="home-tool-icon" aria-hidden="true">@tool.Icon</span>
+                                    <span class="home-tool-body">
+                                        <strong>@tool.Title</strong>
+                                        <span class="home-tool-desc">@tool.Description</span>
+                                        <span class="home-tool-tags">@foreach (var feature in tool.Features) { <span>@feature</span> }</span>
+                                    </span>
+                                    <span class="home-tool-go" aria-hidden="true">→</span>
+                                </a>
+                            }
+                        </div>
+                    </section>
+                }
+                <p id="home-empty" class="home-empty d-none">No tools match your search.</p>
+            </div>
         }
         else
         {
-            @if (Model != "system-logs")
+            @if (Model != "system-logs" && Model != "database-compare")
             {
-                var currentTool = tools.First(tool => tool.Key == Model);
+                var currentTool = ToolCatalog.All.First(tool => tool.Key == Model);
                 <nav class="tool-breadcrumb" aria-label="Breadcrumb">
                     <ol>
                         <li><a asp-action="Index">Home</a></li>
@@ -56,6 +63,8 @@
                 case "system-logs": <partial name="_SystemLogsTool" /> break;
                 case "system-services": <partial name="_SystemServicesTool" /> break;
                 case "sql-doc": <partial name="_SqlDocTool" /> break;
+                case "database-compare": <partial name="_DatabaseCompareTool" /> break;
+                case "deployment": <partial name="_DeploymentTool" /> break;
                 default: <partial name="_HashTool" /> break;
             }
         }
@@ -67,5 +76,9 @@
     @if (Model != "home")
     {
         <script src="~/js/@(Model)-tool.js" asp-append-version="true"></script>
+    }
+    else
+    {
+        <script src="~/js/home.js" asp-append-version="true"></script>
     }
 }

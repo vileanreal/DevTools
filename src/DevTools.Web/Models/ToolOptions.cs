@@ -10,6 +10,8 @@ public sealed class ToolOptions
     public bool SystemLogs { get; set; } = true;
     public bool SystemServices { get; set; } = true;
     public bool SqlDoc { get; set; } = true;
+    public bool DatabaseCompare { get; set; } = true;
+    public bool Deployment { get; set; } = true;
 
     public bool IsEnabled(string key) => key switch
     {
@@ -19,6 +21,8 @@ public sealed class ToolOptions
         "system-logs" => SystemLogs,
         "system-services" => SystemServices,
         "sql-doc" => SqlDoc,
+        "database-compare" => DatabaseCompare,
+        "deployment" => Deployment,
         _ => false
     };
 }

@@ -11,6 +11,10 @@ public sealed class DevToolsDbContext(DbContextOptions<DevToolsDbContext> option
     public DbSet<SqlDocDiagram> SqlDocDiagrams => Set<SqlDocDiagram>();
     public DbSet<ServiceSystem> ServiceSystems => Set<ServiceSystem>();
     public DbSet<ManagedService> ManagedServices => Set<ManagedService>();
+    public DbSet<DeploymentSystem> DeploymentSystems => Set<DeploymentSystem>();
+    public DbSet<DeploymentModule> DeploymentModules => Set<DeploymentModule>();
+    public DbSet<DeploymentPackage> DeploymentPackages => Set<DeploymentPackage>();
+    public DbSet<DeploymentEvent> DeploymentEvents => Set<DeploymentEvent>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -28,6 +32,7 @@ public sealed class DevToolsDbContext(DbContextOptions<DevToolsDbContext> option
             entity.Property(item => item.CustomPattern).HasMaxLength(2000);
             entity.Property(item => item.TimestampFormat).HasMaxLength(100);
             entity.Property(item => item.IncludeSubdirectories).HasDefaultValue(true).IsRequired();
+            entity.Property(item => item.FileNameFilter).HasMaxLength(500);
         });
         modelBuilder.Entity<SqlDocSource>(entity =>
         {
@@ -55,6 +60,42 @@ public sealed class DevToolsDbContext(DbContextOptions<DevToolsDbContext> option
             entity.Property(item => item.Kind).HasMaxLength(30).IsRequired();
             entity.Property(item => item.TargetName).HasMaxLength(260).IsRequired();
             entity.HasIndex(item => new { item.ServiceSystemId, item.Name }).IsUnique();
+        });
+        modelBuilder.Entity<DeploymentSystem>(entity =>
+        {
+            entity.Property(item => item.Name).HasMaxLength(120).IsRequired();
+            entity.Property(item => item.BackupDirectory).HasMaxLength(2048);
+            entity.Property(item => item.PackageDirectory).HasMaxLength(2048);
+            entity.HasIndex(item => item.Name).IsUnique();
+            entity.HasMany(item => item.Modules).WithOne(item => item.DeploymentSystem).HasForeignKey(item => item.DeploymentSystemId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasMany(item => item.Packages).WithOne(item => item.DeploymentSystem).HasForeignKey(item => item.DeploymentSystemId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<DeploymentModule>(entity =>
+        {
+            entity.Property(item => item.Name).HasMaxLength(120).IsRequired();
+            entity.Property(item => item.TargetPath).HasMaxLength(2048).IsRequired();
+            entity.Property(item => item.AppPoolName).HasMaxLength(260);
+            entity.Property(item => item.ServiceName).HasMaxLength(260);
+            entity.Property(item => item.DefaultExclusions).HasMaxLength(4000);
+            entity.HasIndex(item => new { item.DeploymentSystemId, item.Name }).IsUnique();
+        });
+        modelBuilder.Entity<DeploymentPackage>(entity =>
+        {
+            entity.Property(item => item.FileName).HasMaxLength(260).IsRequired();
+            entity.Property(item => item.Description).HasMaxLength(500);
+            entity.HasMany(item => item.Events).WithOne(item => item.DeploymentPackage).HasForeignKey(item => item.DeploymentPackageId).OnDelete(DeleteBehavior.Cascade);
+            entity.Property(item => item.StoredPath).HasMaxLength(2048).IsRequired();
+            entity.Property(item => item.Status).HasMaxLength(30).IsRequired();
+            entity.Property(item => item.AnalysisJson).IsRequired();
+            entity.Property(item => item.BackupPath).HasMaxLength(2048);
+            entity.Property(item => item.Error).HasMaxLength(2000);
+            entity.HasIndex(item => new { item.DeploymentSystemId, item.UploadedAtUtc });
+        });
+        modelBuilder.Entity<DeploymentEvent>(entity =>
+        {
+            entity.Property(item => item.Kind).HasMaxLength(30).IsRequired();
+            entity.Property(item => item.Detail).HasMaxLength(2000);
+            entity.HasIndex(item => new { item.DeploymentPackageId, item.AtUtc });
         });
     }
 }

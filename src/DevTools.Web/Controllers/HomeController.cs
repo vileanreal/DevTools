@@ -31,6 +31,12 @@ public class HomeController(IOptions<ToolOptions> toolOptions) : Controller
     [HttpGet("/tools/sql-doc")]
     public IActionResult SqlDoc() => Tool("sql-doc", "SQL Doc");
 
+    [HttpGet("/tools/database-compare")]
+    public IActionResult DatabaseCompare() => Tool("database-compare", "Database Compare");
+
+    [HttpGet("/tools/deployment")]
+    public IActionResult Deployment() => Tool("deployment", "Deployment");
+
     [HttpGet("/tools/system-services")]
     public IActionResult SystemServices() => Tool("system-services", "System Services");
 
