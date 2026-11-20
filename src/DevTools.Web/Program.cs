@@ -116,6 +116,7 @@ builder.Services.AddSingleton<DeploymentJobService>();
 builder.Services.AddSingleton<IDeploymentJobService>(services => services.GetRequiredService<DeploymentJobService>());
 builder.Services.AddSingleton<IDeploymentJobRegistry>(services => services.GetRequiredService<DeploymentJobService>());
 builder.Services.AddScoped<IDeploymentService, DeploymentService>();
+builder.Services.AddScoped<IPatchManagementService, PatchManagementService>();
 builder.Services.AddMemoryCache(options => options.SizeLimit = 5_000);
 
 var app = builder.Build();

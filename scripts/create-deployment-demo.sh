@@ -12,6 +12,9 @@
 #   scripts/create-deployment-demo.sh --populate [N]    # also upload N test packages (default 24) to try
 #                                                       # pagination, badges and history; some are deployed and
 #                                                       # the last deployment is rolled back
+#   scripts/create-deployment-demo.sh --patch-demo     # mock system for Deployment Patch Management: build folders
+#                                                       # at v1 marked as the latest version, then a simulated v2
+#                                                       # build so View changes / Compile patch have changes to show
 #   scripts/create-deployment-demo.sh --make-packages [N]
 #                                                       # only write N test packages (default 24) to
 #                                                       # ~/Downloads/SampleApp-test-packages for uploading by hand;
@@ -25,11 +28,13 @@ set -euo pipefail
 
 POPULATE=0
 MAKE_ONLY=0
+PATCH_DEMO=0
 case "${1:-}" in
   --populate) POPULATE="${2:-24}" ;;
   --make-packages) POPULATE="${2:-24}"; MAKE_ONLY=1 ;;
+  --patch-demo) PATCH_DEMO=1 ;;
   "") ;;
-  *) echo "Usage: $0 [--populate N | --make-packages N]" >&2; exit 1 ;;
+  *) echo "Usage: $0 [--populate N | --make-packages N | --patch-demo]" >&2; exit 1 ;;
 esac
 [[ "$POPULATE" =~ ^[0-9]+$ ]] || { echo "Usage: $0 [--populate N | --make-packages N]" >&2; exit 1; }
 
@@ -65,6 +70,68 @@ build_test_package() {
   printf '%s\t%s\n' "SampleApp-Release-$version.zip" "$(test_description "$i")" >> "$TEST_PACKAGES/descriptions.txt"
   echo "$zip_path"
 }
+
+# ---------- Mock system for Deployment Patch Management ----------
+if [[ "$PATCH_DEMO" -eq 1 ]]; then
+  build="$DEMO_ROOT/build"
+  patch_system="${PATCH_SYSTEM_NAME:-Sample App Patches}"
+  papi="$DEVTOOLS_URL/api/patch-management"
+  if ! curl -fsS -o /dev/null "$papi/systems"; then echo "DevTools isn't reachable at $DEVTOOLS_URL (or login is on)." >&2; exit 1; fi
+  jstr() { python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$1"; }
+
+  echo "Writing version 1 of the build to $build..."
+  rm -rf "$build"
+  write "$build/WebApi/bin/SampleApp.Api.dll"             "SampleApp.Api v1.0.0"
+  write "$build/WebApi/bin/SampleApp.Core.dll"            "SampleApp.Core v1.0.0"
+  write "$build/WebApi/bin/SampleApp.Reports.dll"         "SampleApp.Reports v1.0.0"
+  write "$build/WebApi/bin/Legacy.Export.dll"             "Legacy.Export v1.0.0 (removed in 1.1)"
+  write "$build/WebApi/wwwroot/js/app.js"                 "console.log('SampleApp web v1.0.0');"
+  write "$build/WebApi/wwwroot/css/site.css"              "body { color: #333; } /* v1.0 */"
+  write "$build/WebApi/web.config"                        "<configuration><!-- ignored by the module --></configuration>"
+  write "$build/WebApi/appsettings.Production.json"       '{ "ignored": "by the module" }'
+  write "$build/WebApi/logs/build.log"                    "build 1.0"
+  write "$build/Worker/SampleApp.Worker.exe"              "SampleApp.Worker v1.0.0"
+  write "$build/Worker/SampleApp.Worker.dll"              "SampleApp.Worker v1.0.0"
+  write "$build/Worker/Plugins/CsvExporter.dll"           "CsvExporter v1.0.0"
+  mkdir -p "$DEMO_ROOT/patches"
+
+  system_id=$(curl -fsS "$papi/systems" | python3 -c '
+import json,sys
+print(next((str(s["id"]) for s in json.load(sys.stdin)["data"] if s["name"]==sys.argv[1]), ""))' "$patch_system")
+  if [[ -z "$system_id" ]]; then
+    echo "Registering '$patch_system' in Deployment Patch Management..."
+    system_id=$(curl -fsS -X POST "$papi/systems" -H 'Content-Type: application/json' \
+      -d "{\"name\":$(jstr "$patch_system"),\"outputDirectory\":$(jstr "$DEMO_ROOT/patches")}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["data"]["id"])')
+    curl -fsS -o /dev/null -X POST "$papi/systems/$system_id/modules" -H 'Content-Type: application/json' \
+      -d "{\"name\":\"WebApi\",\"sourcePath\":$(jstr "$build/WebApi"),\"exclusions\":$(jstr $'web.config\nappsettings*.json\nlogs/')}"
+    curl -fsS -o /dev/null -X POST "$papi/systems/$system_id/modules" -H 'Content-Type: application/json' \
+      -d "{\"name\":\"Worker\",\"sourcePath\":$(jstr "$build/Worker"),\"exclusions\":$(jstr 'logs/')}"
+  else
+    echo "'$patch_system' already exists (id $system_id); resetting its build to version 1."
+  fi
+
+  echo "Marking version 1 as the latest version (what UAT/production has)..."
+  curl -fsS -o /dev/null -X POST "$papi/systems/$system_id/latest" -H 'Content-Type: application/json' -d '{"label":"UAT baseline v1.0"}'
+
+  sleep 1.2   # so changed files get a newer timestamp
+  echo "Simulating build 1.1..."
+  write "$build/WebApi/bin/SampleApp.Api.dll"             "SampleApp.Api v1.1.0"            # CHANGED
+  write "$build/WebApi/bin/SampleApp.Core.dll"            "SampleApp.Core v1.1.0"           # CHANGED
+  write "$build/WebApi/bin/SampleApp.Invoicing.dll"       "SampleApp.Invoicing v1.1.0 (new)" # ADDED
+  write "$build/WebApi/wwwroot/js/invoices.js"            "console.log('invoice export v1.1.0');" # ADDED
+  write "$build/WebApi/wwwroot/js/app.js"                 "console.log('SampleApp web v1.1.0');"  # CHANGED
+  rm -f "$build/WebApi/bin/Legacy.Export.dll"                                                 # DELETED
+  touch "$build/WebApi/bin/SampleApp.Reports.dll"          # rebuilt but identical: not a change (same hash)
+  write "$build/WebApi/web.config"                        "<configuration><!-- edited, but ignored --></configuration>"
+  echo "build 1.1" >> "$build/WebApi/logs/build.log"       # ignored folder
+  write "$build/Worker/SampleApp.Worker.dll"              "SampleApp.Worker v1.1.0"         # CHANGED
+  write "$build/Worker/Plugins/PdfExporter.dll"           "PdfExporter v1.1.0 (new)"        # ADDED
+  rm -f "$build/Worker/Plugins/CsvExporter.dll"                                              # DELETED
+
+  echo "Done. Open $DEVTOOLS_URL/tools/patch-management?system=$system_id and click View changes."
+  echo "Expected: 4 changed, 3 added, 2 deleted (web.config, logs/ and the untouched Reports.dll are not listed)."
+  exit 0
+fi
 
 if [[ "$MAKE_ONLY" -eq 1 ]]; then
   mkdir -p "$TEST_PACKAGES"; : > "$TEST_PACKAGES/descriptions.txt"

@@ -12,6 +12,7 @@ public sealed class ToolOptions
     public bool SqlDoc { get; set; } = true;
     public bool DatabaseCompare { get; set; } = true;
     public bool Deployment { get; set; } = true;
+    public bool PatchManagement { get; set; } = true;
 
     public bool IsEnabled(string key) => key switch
     {
@@ -23,6 +24,7 @@ public sealed class ToolOptions
         "sql-doc" => SqlDoc,
         "database-compare" => DatabaseCompare,
         "deployment" => Deployment,
+        "patch-management" => PatchManagement,
         _ => false
     };
 }

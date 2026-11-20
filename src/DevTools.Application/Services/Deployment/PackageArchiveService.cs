@@ -21,6 +21,9 @@ public interface IPackageArchiveService
     /// </summary>
     int Extract(string archivePath, string destinationRoot, Func<string, string?> map, Action<string>? onFile, CancellationToken cancellationToken);
 
+    /// <summary>Writes a .zip (Deflate) or .7z (LZMA2) archive from files on disk plus optional text entries. Streams each file.</summary>
+    void CreateArchive(string archivePath, string format, IEnumerable<ArchiveSource> files, IReadOnlyDictionary<string, string>? textEntries, Action<string>? onFile, CancellationToken cancellationToken);
+
     /// <summary>Writes a .7z archive (LZMA2) from files on disk plus optional in-memory text entries. Streams each file; nothing is buffered whole.</summary>
     void CreateSevenZip(string archivePath, IEnumerable<ArchiveSource> files, IReadOnlyDictionary<string, string>? textEntries, Action<string>? onFile, CancellationToken cancellationToken);
 
@@ -114,6 +117,41 @@ public sealed class PackageArchiveService : IPackageArchiveService
                 {
                     using var source = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(content));
                     writer.Write(name, source, DateTime.Now);
+                }
+            }
+            File.Move(temporary, archivePath, overwrite: false);
+        }
+        finally
+        {
+            if (File.Exists(temporary)) File.Delete(temporary);
+        }
+    }
+
+    public void CreateArchive(string archivePath, string format, IEnumerable<ArchiveSource> files, IReadOnlyDictionary<string, string>? textEntries, Action<string>? onFile, CancellationToken cancellationToken)
+    {
+        if (format == "7z") { CreateSevenZip(archivePath, files, textEntries, onFile, cancellationToken); return; }
+        if (format != "zip") throw new InvalidOperationException("Choose .zip or .7z.");
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(archivePath))!);
+        var temporary = archivePath + ".partial";
+        try
+        {
+            using (var stream = new FileStream(temporary, FileMode.Create, FileAccess.ReadWrite, FileShare.None, 1024 * 128))
+            using (var zip = new System.IO.Compression.ZipArchive(stream, System.IO.Compression.ZipArchiveMode.Create))
+            {
+                foreach (var file in files)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var entry = zip.CreateEntry(file.EntryName, System.IO.Compression.CompressionLevel.Optimal);
+                    entry.LastWriteTime = File.GetLastWriteTime(file.SourcePath);
+                    using (var source = new FileStream(file.SourcePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 1024 * 128))
+                    using (var target = entry.Open())
+                        source.CopyTo(target, 1024 * 128);
+                    onFile?.Invoke(file.EntryName);
+                }
+                foreach (var (name, content) in textEntries ?? new Dictionary<string, string>())
+                {
+                    using var writer = new StreamWriter(zip.CreateEntry(name).Open(), new System.Text.UTF8Encoding(false));
+                    writer.Write(content);
                 }
             }
             File.Move(temporary, archivePath, overwrite: false);

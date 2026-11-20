@@ -7,11 +7,12 @@ namespace DevTools.Web.Data;
 
 public static class DatabaseInitializer
 {
-    private const int CurrentSchemaVersion = 5;
+    private const int CurrentSchemaVersion = 6;
     private static readonly string[] ApplicationTables =
     [
         "LogSystems", "LogSources", "SqlDocSources", "SqlDocDiagrams", "ServiceSystems", "ManagedServices",
-        "DeploymentSystems", "DeploymentModules", "DeploymentPackages", "DeploymentEvents"
+        "DeploymentSystems", "DeploymentModules", "DeploymentPackages", "DeploymentEvents",
+        "PatchSystems", "PatchModules", "PatchSnapshots", "PatchPackages"
     ];
 
     public static void Initialize(DevToolsDbContext database)
@@ -159,6 +160,58 @@ public static class DatabaseInitializer
             )
             """, transaction);
         Execute(connection, """
+            CREATE TABLE IF NOT EXISTS PatchSystems (
+                Id INTEGER NOT NULL CONSTRAINT PK_PatchSystems PRIMARY KEY AUTOINCREMENT,
+                Name TEXT NOT NULL,
+                OutputDirectory TEXT NULL
+            )
+            """, transaction);
+        Execute(connection, """
+            CREATE TABLE IF NOT EXISTS PatchModules (
+                Id INTEGER NOT NULL CONSTRAINT PK_PatchModules PRIMARY KEY AUTOINCREMENT,
+                PatchSystemId INTEGER NOT NULL,
+                Name TEXT NOT NULL,
+                SourcePath TEXT NOT NULL,
+                Exclusions TEXT NULL,
+                CONSTRAINT FK_PatchModules_PatchSystems_PatchSystemId FOREIGN KEY (PatchSystemId) REFERENCES PatchSystems (Id) ON DELETE CASCADE
+            )
+            """, transaction);
+        Execute(connection, """
+            CREATE TABLE IF NOT EXISTS PatchSnapshots (
+                Id INTEGER NOT NULL CONSTRAINT PK_PatchSnapshots PRIMARY KEY AUTOINCREMENT,
+                PatchSystemId INTEGER NOT NULL,
+                CreatedAtUtc TEXT NOT NULL,
+                Source TEXT NOT NULL,
+                Label TEXT NULL,
+                CreatedBy TEXT NULL,
+                IsLatest INTEGER NOT NULL DEFAULT 0,
+                MarkedLatestAtUtc TEXT NULL,
+                FileCount INTEGER NOT NULL,
+                TotalBytes INTEGER NOT NULL,
+                ManifestGz BLOB NOT NULL,
+                CONSTRAINT FK_PatchSnapshots_PatchSystems_PatchSystemId FOREIGN KEY (PatchSystemId) REFERENCES PatchSystems (Id) ON DELETE CASCADE
+            )
+            """, transaction);
+        Execute(connection, """
+            CREATE TABLE IF NOT EXISTS PatchPackages (
+                Id INTEGER NOT NULL CONSTRAINT PK_PatchPackages PRIMARY KEY AUTOINCREMENT,
+                PatchSystemId INTEGER NOT NULL,
+                CreatedAtUtc TEXT NOT NULL,
+                Format TEXT NOT NULL,
+                FileName TEXT NOT NULL,
+                StoredPath TEXT NOT NULL,
+                SizeBytes INTEGER NOT NULL,
+                Label TEXT NULL,
+                CreatedBy TEXT NULL,
+                Added INTEGER NOT NULL,
+                Changed INTEGER NOT NULL,
+                Deleted INTEGER NOT NULL,
+                BaseSnapshotId INTEGER NULL,
+                SnapshotId INTEGER NOT NULL,
+                CONSTRAINT FK_PatchPackages_PatchSystems_PatchSystemId FOREIGN KEY (PatchSystemId) REFERENCES PatchSystems (Id) ON DELETE CASCADE
+            )
+            """, transaction);
+        Execute(connection, """
             CREATE TABLE IF NOT EXISTS DevToolsSchema (
                 Id INTEGER NOT NULL CONSTRAINT PK_DevToolsSchema PRIMARY KEY CHECK (Id = 1),
                 Version INTEGER NOT NULL,
@@ -196,6 +249,10 @@ public static class DatabaseInitializer
         Execute(connection, "CREATE UNIQUE INDEX IF NOT EXISTS IX_DeploymentModules_DeploymentSystemId_Name ON DeploymentModules (DeploymentSystemId, Name)", transaction);
         Execute(connection, "CREATE INDEX IF NOT EXISTS IX_DeploymentPackages_DeploymentSystemId_UploadedAtUtc ON DeploymentPackages (DeploymentSystemId, UploadedAtUtc)", transaction);
         Execute(connection, "CREATE INDEX IF NOT EXISTS IX_DeploymentEvents_DeploymentPackageId_AtUtc ON DeploymentEvents (DeploymentPackageId, AtUtc)", transaction);
+        Execute(connection, "CREATE UNIQUE INDEX IF NOT EXISTS IX_PatchSystems_Name ON PatchSystems (Name)", transaction);
+        Execute(connection, "CREATE UNIQUE INDEX IF NOT EXISTS IX_PatchModules_PatchSystemId_Name ON PatchModules (PatchSystemId, Name)", transaction);
+        Execute(connection, "CREATE INDEX IF NOT EXISTS IX_PatchSnapshots_PatchSystemId_CreatedAtUtc ON PatchSnapshots (PatchSystemId, CreatedAtUtc)", transaction);
+        Execute(connection, "CREATE INDEX IF NOT EXISTS IX_PatchPackages_PatchSystemId_CreatedAtUtc ON PatchPackages (PatchSystemId, CreatedAtUtc)", transaction);
     }
 
     private static bool RequiresSchemaRepair(DbConnection connection)

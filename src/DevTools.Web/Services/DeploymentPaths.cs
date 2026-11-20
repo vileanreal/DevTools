@@ -11,6 +11,7 @@ public interface IDeploymentPaths
     string StagingDirectory { get; }
     string BackupDirectory(DeploymentSystem system);
     string PackageDirectory(DeploymentSystem system);
+    string PatchOutputDirectory(PatchSystem system);
     string Normalize(string path, string label);
     bool Overlaps(string first, string second);
     void EnsureSafeTargetFolder(string path);
@@ -42,6 +43,12 @@ public sealed class DeploymentPaths : IDeploymentPaths
         string.IsNullOrWhiteSpace(system.PackageDirectory)
             ? Path.Combine(WorkingDirectory, "packages", SafeFolderName(system.Name))
             : system.PackageDirectory;
+
+    /// <summary>Where compiled patch archives are kept: the system's own folder, or the working folder by default.</summary>
+    public string PatchOutputDirectory(PatchSystem system) =>
+        string.IsNullOrWhiteSpace(system.OutputDirectory)
+            ? Path.Combine(WorkingDirectory, "patches", SafeFolderName(system.Name))
+            : system.OutputDirectory;
 
     public string BackupDirectory(DeploymentSystem system) =>
         string.IsNullOrWhiteSpace(system.BackupDirectory)

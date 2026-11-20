@@ -901,3 +901,65 @@ html[data-theme="dark"] .deploy-run-warning { color:#fec84b; }
 .home-group[hidden],.home-tool[hidden] { display:none!important; }
 .home-empty { margin:1.5rem 0; color:var(--muted); text-align:center; }
 @media (max-width:600px) { .home-search { flex-basis:100%; } .home-head-title h1 { font-size:1.35rem; } }
+/* Deployment Patch Management */
+.patch-version { display:flex; align-items:center; justify-content:space-between; gap:.75rem 1.25rem; flex-wrap:wrap; }
+.patch-version-info { display:flex; min-width:0; flex-direction:column; gap:.1rem; }
+.patch-version-info strong { color:var(--ink); font-size:1rem; overflow-wrap:anywhere; }
+.patch-version-info small { color:var(--muted); font-size:.74rem; }
+.patch-version-actions { display:flex; align-items:center; gap:.5rem; flex-wrap:wrap; }
+.patch-version-actions .btn + .btn { margin-left:0; }
+.patch-compare { display:flex; align-items:center; gap:.4rem; margin:0; color:var(--muted); font-size:.74rem; white-space:nowrap; }
+.patch-compare .form-select { max-width:240px; }
+.patch-status-snapshot { background:#64748b; color:#fff; }
+.patch-change-summary { display:flex; align-items:center; gap:.4rem; margin-bottom:.6rem; flex-wrap:wrap; }
+.patch-change-chip { display:inline-flex; align-items:baseline; gap:.35rem; padding:.3rem .65rem; border:1px solid var(--line); border-radius:999px; background:var(--surface); color:var(--muted); font-size:.74rem; font-weight:650; }
+.patch-change-chip strong { color:var(--ink); font-size:.86rem; }
+.patch-change-chip.active { border-color:var(--brand); box-shadow:inset 0 0 0 1px var(--brand); }
+.patch-change-chip.kind-added strong { color:#067647; }.patch-change-chip.kind-changed strong { color:#175cd3; }.patch-change-chip.kind-deleted strong { color:#b42318; }
+.patch-module-summary { display:flex; gap:.3rem; margin-left:auto; flex-wrap:wrap; }
+.patch-file-list { max-height:420px; }
+.patch-file-list li { grid-template-columns:78px minmax(70px,140px) minmax(0,1fr) auto; }
+.patch-file-module { overflow:hidden; color:var(--muted); font-size:.7rem; font-weight:650; text-overflow:ellipsis; white-space:nowrap; }
+.deploy-file-tag.patch-kind-added { background:color-mix(in srgb,#12b76a 15%,transparent); color:#067647; }
+.deploy-file-tag.patch-kind-changed { background:color-mix(in srgb,#2e90fa 15%,transparent); color:#175cd3; }
+.deploy-file-tag.patch-kind-deleted { background:color-mix(in srgb,#f04438 14%,transparent); color:#b42318; }
+.patch-count.added { color:#067647; }.patch-count.changed { color:#175cd3; }.patch-count.deleted { color:#b42318; }
+.patch-compile-structure { display:flex; flex-direction:column; gap:.2rem; padding:.6rem .75rem; border-radius:10px; background:var(--surface-soft); font-size:.76rem; }
+.patch-compile-structure code { color:var(--ink); }
+.patch-format span { max-width:none; }
+@media (max-width:600px) { .patch-file-list li { grid-template-columns:68px minmax(0,1fr); } .patch-file-list li .patch-file-module,.patch-file-list li small { display:none; } .patch-module-summary { margin-left:0; } }
+/* Patch Management: changes grouped by module */
+.patch-module-group { margin-bottom:.75rem; }
+.patch-module-group header { display:flex; align-items:baseline; justify-content:space-between; gap:.5rem; margin-bottom:.3rem; padding-bottom:.25rem; border-bottom:1px solid var(--line); flex-wrap:wrap; }
+.patch-module-group header strong { color:var(--ink); font-size:.86rem; }
+.patch-module-counts { display:flex; gap:.6rem; font-size:.72rem; font-weight:650; }
+.patch-module-group .patch-file-list { max-height:none; }
+.patch-module-group .patch-file-list li { grid-template-columns:78px minmax(0,1fr) auto; }
+#patch-details-changes .patch-file-list { max-height:none; }
+.patch-page .deploy-package-row.compact { cursor:pointer; }
+.patch-page .deploy-package-row.compact:hover .deploy-package-line strong { color:var(--brand-dark); text-decoration:underline; }
+.patch-page .deploy-package-row.compact:focus-visible { outline:2px solid color-mix(in srgb,var(--brand) 55%,transparent); outline-offset:-2px; }
+@media (max-width:600px) { .patch-module-group .patch-file-list li { grid-template-columns:68px minmax(0,1fr); } }
+
+/* Release tools: one button size everywhere (header, cards, rows, dialogs) */
+.deploy-page .btn-sm, .deploy-page .icon-button,
+#deployRunModal .btn, #deployRollbackModal .btn, #deployPackageModal .btn, #deployModulesModal .btn, #deployModuleModal .btn, #deploySystemModal .btn, #deployUploadConfirmModal .btn,
+#patchDetailsModal .btn, #patchModulesModal .btn, #patchModuleModal .btn, #patchSystemModal .btn, #patchCompileModal .btn, #patchLatestModal .btn {
+  display:inline-flex; height:32px; min-height:32px; align-items:center; justify-content:center; gap:.35rem; padding:0 .8rem; border-radius:8px; font-size:.78rem; font-weight:650; line-height:1; white-space:nowrap;
+}
+.deploy-page .icon-button, #deployPackageModal .icon-button, #patchDetailsModal .icon-button, #deployModulesModal .icon-button, #patchModulesModal .icon-button { width:32px; min-width:32px; padding:0; font-size:1.05rem; }
+.deploy-page .deploy-package-row.compact .deploy-row-actions .btn { height:32px; padding:0 .8rem; font-size:.78rem; }
+.deploy-page .form-select-sm, .deploy-page .form-control-sm { height:32px; min-height:32px; font-size:.78rem; }
+.deploy-page .deploy-row-actions, #deployPackageModal .deploy-row-actions, #patchDetailsModal .deploy-row-actions { gap:.4rem; }
+.deploy-page .deploy-row-actions .btn + .btn, #patchDetailsModal .btn + .btn, #deployPackageModal .btn + .btn { margin-left:0; }
+#deployPackageModal .icon-button, #patchDetailsModal .icon-button { display:inline-flex; height:32px; min-height:32px; align-items:center; justify-content:center; border-radius:8px; }
+/* Release tools: smaller buttons inside list rows (packages, patches, snapshots, modules); headers and dialogs stay 32px */
+.deploy-page .deploy-package-row .deploy-row-actions .btn, .deploy-page .deploy-package-row.compact .deploy-row-actions .btn,
+#deployModulesModal .deploy-module-row .btn, #patchModulesModal .deploy-module-row .btn {
+  height:26px; min-height:26px; padding:0 .6rem; border-radius:7px; font-size:.72rem;
+}
+.deploy-page .deploy-package-row .deploy-row-actions .icon-button, .deploy-page .deploy-package-row.compact .deploy-row-actions .icon-button,
+#deployModulesModal .deploy-module-row .icon-button, #patchModulesModal .deploy-module-row .icon-button {
+  display:inline-flex; width:26px; min-width:26px; height:26px; min-height:26px; align-items:center; justify-content:center; padding:0; border-radius:7px; font-size:.95rem;
+}
+.deploy-page .deploy-package-row .deploy-row-actions, #deployModulesModal .deploy-module-row .deploy-row-actions, #patchModulesModal .deploy-module-row .deploy-row-actions { gap:.3rem; }

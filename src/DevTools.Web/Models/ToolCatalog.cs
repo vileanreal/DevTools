@@ -22,6 +22,7 @@ public static class ToolCatalog
         new("system-logs", "Observe & operate", "tone-4", "System logs", "Index log folders, then search, filter and chart every entry across modules.", "▦", "SystemLogs", ["Full-text search", "Charts", "File filters"]),
         new("system-services", "Observe & operate", "tone-5", "System Services", "Watch Windows services and IIS app pools, and start, stop or restart them.", "⚙", "SystemServices", ["Windows services", "IIS app pools", "Restart"]),
         new("deployment", "Release & deployment", "tone-1", "Deployment", "Upload a package, back up, stop app pools and services, patch, and start them again — with one-click rollback.", "⇪", "Deployment", ["Upload .zip/.7z", "Auto backup", "Rollback"]),
+        new("patch-management", "Release & deployment", "tone-3", "Deployment Patch Management", "Track the files on this server, list what changed since the version on UAT/production, and compile the changes into a patch.", "Δ", "PatchManagement", ["Snapshots", "ADDED / CHANGED / DELETED", ".zip or .7z"]),
         new("sql-doc", "Database", "tone-6", "SQL Doc", "Inspect a database, export its documentation and draw relationship diagrams.", "DB", "SqlDoc", ["Schema docs", "Diagrams", "5 providers"]),
         new("database-compare", "Database", "tone-2", "Database Compare", "Diff two schemas side by side and generate the SQL to bring a target up to date.", "⇄", "DatabaseCompare", ["Side-by-side diff", "Update scripts", "Apply"])
     ];

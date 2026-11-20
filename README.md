@@ -14,6 +14,7 @@ DevTools is a local-first ASP.NET Core web application that collects practical u
 - Word (`.docx`) database documentation generation
 - Windows service and IIS application-pool monitoring and control
 - Deployment of `.zip`/`.7z` packages to IIS sites and Windows services with automatic `.7z` backups, progress tracking, auto-restore and rollback
+- Deployment Patch Management: SHA-256 snapshots of module folders, changes since the version on UAT/production, and `.zip`/`.7z` patches with ADDED/CHANGED/DELETED folders per module
 - Light and dark themes
 - Optional cookie-based login protection
 
@@ -80,7 +81,8 @@ Individual tools can be removed from the home screen and their MVC routes by set
   "SystemServices": true,
   "SqlDoc": true,
   "DatabaseCompare": true,
-  "Deployment": true
+  "Deployment": true,
+  "PatchManagement": true
 }
 ```
 
@@ -161,7 +163,7 @@ The Deployment tool patches web apps and Windows services on the machine running
 5. **Packages list**: shows 10 rows per page by default (10/25/50). Click a package to see its details: description, dates, backup, the files in each module, and its history. A deployed package only offers **Rollback**; it can't be deployed again or deleted until it's rolled back. Uploading asks for confirmation when the system still has packages that were never deployed.
 6. **History**: each package keeps a detailed, dated history (who, how long, what each module changed, which services were stopped and started, the backup's size, and any failed step) — uploaded (with notes such as a skipped wrapper folder or ignored folders), each deployment started and its outcome (deployed, failed, restored, interrupted), and each rollback — with the modules, backup file and any error.
 
-To try it locally, run `scripts/create-deployment-demo.sh` with DevTools running (add `--populate 24` to also upload 24 test packages, deploy some and roll the last one back, for trying pagination, badges and history; or `--make-packages 24` to only write the test packages to `~/Downloads/SampleApp-test-packages` for uploading by hand). Test packages are kept in that folder with a `descriptions.txt`. It creates mock server folders with version 1 of a web app and a worker in `~/DevToolsDeploymentDemo`, writes a version 2 package to `~/Downloads/SampleApp-Release-2.0.zip`, and registers the **Sample App** system. Running it again resets the mock servers to version 1.
+To try it locally, run `scripts/create-deployment-demo.sh` with DevTools running (add `--populate 24` to also upload 24 test packages, deploy some and roll the last one back, for trying pagination, badges and history; or `--make-packages 24` to only write the test packages to `~/Downloads/SampleApp-test-packages` for uploading by hand). Test packages are kept in that folder with a `descriptions.txt`. It creates mock server folders with version 1 of a web app and a worker in `~/DevToolsDeploymentDemo`, writes a version 2 package to `~/Downloads/SampleApp-Release-2.0.zip`, and registers the **Sample App** system. Running it again resets the mock servers to version 1. For Deployment Patch Management, `scripts/create-deployment-demo.sh --patch-demo` creates the **Sample App Patches** system with mock build folders in `~/DevToolsDeploymentDemo/build`, marks version 1 as the latest version, then simulates a 1.1 build so **View changes** and **Compile patch** have changes to show (running it again resets it).
 
 Exclusion patterns are one per line: a name such as `web.config` matches at any depth, `*`/`?` are wildcards, a trailing `/` means a folder (`logs/`), and patterns containing `/` are anchored to the module folder (`App_Data/**`). Excluded files are never replaced, deleted or restored over.
 
@@ -179,6 +181,18 @@ Exclusion patterns are one per line: a name such as `web.config` matches at any 
 - The DevTools app-pool identity needs modify permission on every module target folder, the backup folders and the working folder, and permission to stop and start the configured app pools and services (usually an administrator account).
 - `.zip` and `.7z` are read and `.7z` backups are written with the MIT-licensed SharpCompress library; 7-Zip doesn't need to be installed.
 - Modules can't target a drive root, DevTools' own folder or its working folder, and a system's package and backup folders must be outside every module folder.
+
+### Deployment Patch Management
+
+For environments you can't reach (for example UAT or production at a client), this tool works out what changed and packages it so the client can apply it.
+
+1. Create a **system** and add one **module** per folder to track (usually the compiled output of each web app or service). A module's name becomes its folder name inside the patch. Optional ignore patterns (same syntax as Deployment exclusions) keep files such as `web.config` or `logs/` out of tracking and patches.
+2. **Set current as latest version** once the files match what's on UAT/production. This takes a snapshot: every file's path, size, last write time and SHA-256 hash (no file contents are stored).
+3. After a new build, **View changes** compares the files on disk with the latest version (or any older snapshot) and lists ADDED, CHANGED (different hash) and DELETED files per module.
+4. **Compile patch** writes a `.zip` or `.7z` with one folder per module — `<module>/ADDED/…`, `<module>/CHANGED/…`, `<module>/DELETED/DELETED-FILES.txt` — and a `PATCH-NOTES.txt` with instructions and the full list. Each compiled patch is kept with its own snapshot and can be downloaded from the Patches list; click a patch or snapshot to see its details and its changes grouped by module.
+5. When the client has applied a patch, use **Set as latest** on that patch (or on the current files) so the next patch only contains newer changes. Every snapshot is kept in the history and can show what changed compared with the snapshot before it.
+
+Unchanged files reuse their previous hash when their size and last write time match, so repeated checks are fast. Patches are saved in the system's patch output folder, or under `deployments/patches/<system>` by default.
 
 ### Hash algorithms
 

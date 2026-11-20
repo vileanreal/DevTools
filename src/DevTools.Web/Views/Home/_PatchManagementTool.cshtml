@@ -1,0 +1,131 @@
+<div class="deploy-page patch-page">
+<div class="tool-heading compact-tool-heading deploy-heading">
+    <div><span class="eyebrow">RELEASE OPERATIONS</span><h1>Deployment Patch Management</h1><p>Track the files of each module on this server, see what changed since the version on UAT/production, and compile the changes into a patch for the client.</p></div>
+    <span class="badge-soft">Snapshots · SHA-256</span>
+</div>
+
+<section id="patch-systems-view" class="content-section">
+    <div class="section-heading">
+        <div><h2>Systems</h2><p>A system groups the module folders you patch together.</p></div>
+        <button id="patch-system-add" class="btn btn-primary" type="button"><span aria-hidden="true">＋</span> Add system</button>
+    </div>
+    <div id="patch-system-list" class="system-list-rows"><div class="empty-state">Loading systems…</div></div>
+</section>
+
+<section id="patch-system-detail" class="deploy-detail d-none">
+    <div class="deploy-detail-bar">
+        <button id="patch-system-back" class="btn btn-sm btn-ghost" type="button" title="All systems" aria-label="All systems">←</button>
+        <div class="deploy-detail-title"><h2 id="patch-system-name"></h2></div>
+        <button id="patch-modules-manage" class="btn btn-sm deploy-btn-modules" type="button">Manage modules <span id="patch-modules-count" class="deploy-count-badge">0</span></button>
+        <button id="patch-system-edit" class="btn btn-sm btn-outline-primary" type="button">Edit system</button>
+        <button id="patch-system-delete" class="btn btn-sm btn-ghost text-danger" type="button">Delete</button>
+    </div>
+
+    <div class="deploy-layout deploy-layout-single">
+        <div id="patch-no-modules" class="deploy-no-modules d-none">This system has no modules yet. <button id="patch-no-modules-add" class="btn btn-sm btn-primary" type="button">＋ Add module</button></div>
+
+        <section class="deploy-card patch-version-card">
+            <div class="patch-version">
+                <div class="patch-version-info">
+                    <span class="eyebrow">LATEST VERSION</span>
+                    <strong id="patch-latest-title">Not set yet</strong>
+                    <small id="patch-latest-meta">Set the current files as the latest version once they match UAT/production.</small>
+                </div>
+                <div class="patch-version-actions">
+                    <label class="patch-compare"><span>Compare with</span><select id="patch-compare-base" class="form-select form-select-sm"></select></label>
+                    <button id="patch-view-changes" class="btn btn-sm btn-outline-primary" type="button">View changes</button>
+                    <button id="patch-compile" class="btn btn-sm btn-primary" type="button">Compile patch</button>
+                    <button id="patch-set-latest" class="btn btn-sm deploy-btn-modules" type="button">Set current as latest</button>
+                </div>
+            </div>
+        </section>
+
+        <section id="patch-changes" class="deploy-card d-none" aria-live="polite">
+            <div class="deploy-card-head"><h3 id="patch-changes-title">Changes</h3><span id="patch-changes-meta"></span></div>
+            <div id="patch-changes-body"></div>
+        </section>
+
+        <section class="deploy-card">
+            <div class="deploy-card-head"><h3>Patches</h3><span>Compiled patches, newest first</span></div>
+            <div id="patch-package-list" class="deploy-package-list"><div class="empty-state">No patches compiled yet.</div></div>
+        </section>
+
+        <section class="deploy-card">
+            <div class="deploy-card-head"><h3>Snapshots</h3><span>Every recorded version of the files, newest first</span></div>
+            <div id="patch-snapshot-list" class="deploy-package-list"><div class="empty-state">No snapshots yet.</div></div>
+        </section>
+    </div>
+</section>
+</div>
+
+<div class="modal fade" id="patchSystemModal" tabindex="-1" aria-labelledby="patch-system-modal-title" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered"><form id="patch-system-form" class="modal-content">
+        <div class="modal-header"><div><h5 class="modal-title" id="patch-system-modal-title">Add system</h5><p class="modal-subtitle">Use a product or environment name.</p></div><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
+        <div class="modal-body service-form-fields">
+            <div><label class="field-label" for="patch-system-name-input">System name</label><input id="patch-system-name-input" class="form-control" maxlength="120" required placeholder="e.g. Sample App UAT"></div>
+            <div><label class="field-label" for="patch-system-output-input">Patch output folder <span class="text-muted fw-normal">(optional)</span></label><input id="patch-system-output-input" class="form-control" maxlength="2048" placeholder="e.g. C:\Patches\MyApp"><div class="form-text">Compiled patches are saved here. Leave empty to use DevTools' deployments folder. It must be outside the module folders.</div></div>
+        </div>
+        <div class="modal-footer"><button type="button" class="btn btn-ghost" data-bs-dismiss="modal">Cancel</button><button id="patch-system-submit" class="btn btn-primary" type="submit">Add system</button></div>
+    </form></div>
+</div>
+
+<div class="modal fade" id="patchModulesModal" tabindex="-1" aria-labelledby="patch-modules-title" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable"><div class="modal-content">
+        <div class="modal-header"><div><h5 class="modal-title" id="patch-modules-title">Manage modules</h5><p class="modal-subtitle">Each module is a folder on this server; its name becomes the folder name inside the patch.</p></div><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
+        <div class="modal-body"><div id="patch-module-list" class="deploy-module-list"></div></div>
+        <div class="modal-footer"><button id="patch-module-add" class="btn btn-primary me-auto" type="button">＋ Add module</button><button type="button" class="btn btn-ghost" data-bs-dismiss="modal">Close</button></div>
+    </div></div>
+</div>
+
+<div class="modal fade" id="patchModuleModal" tabindex="-1" aria-labelledby="patch-module-modal-title" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered"><form id="patch-module-form" class="modal-content">
+        <div class="modal-header"><div><h5 class="modal-title" id="patch-module-modal-title">Add module</h5><p class="modal-subtitle">Point it at the module's compiled output folder.</p></div><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
+        <div class="modal-body deploy-module-form">
+            <div><label class="field-label" for="patch-module-name">Module name (folder in the patch)</label><input id="patch-module-name" class="form-control" maxlength="120" required placeholder="e.g. WebApi"></div>
+            <div><label class="field-label" for="patch-module-source">Module folder</label><input id="patch-module-source" class="form-control" maxlength="2048" required placeholder="e.g. C:\Build\MyApp\WebApi"></div>
+            <div class="deploy-span-2"><label class="field-label" for="patch-module-exclusions">Files to ignore <span class="text-muted fw-normal">(optional)</span></label><textarea id="patch-module-exclusions" class="form-control code-input" rows="4" maxlength="4000" spellcheck="false" placeholder="web.config&#10;appsettings*.json&#10;logs/"></textarea><div class="form-text">Ignored files are never tracked or included in a patch. One pattern per line: a name matches at any depth, <code>*</code> and <code>?</code> are wildcards, a trailing <code>/</code> means a folder, and <code>**</code> spans folders.</div></div>
+        </div>
+        <div class="modal-footer"><button type="button" class="btn btn-ghost" data-bs-dismiss="modal">Cancel</button><button id="patch-module-submit" class="btn btn-primary" type="submit">Add module</button></div>
+    </form></div>
+</div>
+
+<div class="modal fade" id="patchCompileModal" tabindex="-1" aria-labelledby="patch-compile-title" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered"><form id="patch-compile-form" class="modal-content">
+        <div class="modal-header"><div><h5 class="modal-title" id="patch-compile-title">Compile patch</h5><p id="patch-compile-subtitle" class="modal-subtitle"></p></div><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
+        <div class="modal-body service-form-fields">
+            <div>
+                <span class="field-label">Format</span>
+                <div class="dc-segmented-modes patch-format" role="radiogroup" aria-label="Patch format">
+                    <label><input type="radio" name="patch-format" value="zip" checked><span><strong>.zip</strong><small>Opens anywhere, including Windows Explorer</small></span></label>
+                    <label><input type="radio" name="patch-format" value="7z"><span><strong>.7z</strong><small>Smaller; needs 7-Zip to open</small></span></label>
+                </div>
+            </div>
+            <div><label class="field-label" for="patch-compile-label">Description <span class="text-muted fw-normal">(optional)</span></label><input id="patch-compile-label" class="form-control" maxlength="500" placeholder="e.g. Redmine #1234 — invoice export fix"></div>
+            <div class="patch-compile-structure"><strong>Inside the patch</strong><code>&lt;module&gt;/ADDED/…</code><code>&lt;module&gt;/CHANGED/…</code><code>&lt;module&gt;/DELETED/DELETED-FILES.txt</code><code>PATCH-NOTES.txt</code></div>
+        </div>
+        <div class="modal-footer"><button type="button" class="btn btn-ghost" data-bs-dismiss="modal">Cancel</button><button id="patch-compile-submit" class="btn btn-primary" type="submit">Compile</button></div>
+    </form></div>
+</div>
+
+<div class="modal fade" id="patchLatestModal" tabindex="-1" aria-labelledby="patch-latest-modal-title" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered"><form id="patch-latest-form" class="modal-content">
+        <div class="modal-header"><h5 class="modal-title" id="patch-latest-modal-title">Set current as latest version?</h5><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
+        <div class="modal-body service-form-fields">
+            <p class="mb-0">Takes a snapshot of every module's files now and marks it as the version on UAT/production. Later changes are measured from it.</p>
+            <div><label class="field-label" for="patch-latest-label">Label <span class="text-muted fw-normal">(optional)</span></label><input id="patch-latest-label" class="form-control" maxlength="500" placeholder="e.g. Production release 2.4"></div>
+        </div>
+        <div class="modal-footer"><button type="button" class="btn btn-ghost" data-bs-dismiss="modal">Cancel</button><button id="patch-latest-submit" class="btn btn-primary" type="submit">Set as latest</button></div>
+    </form></div>
+</div>
+
+<div class="modal fade" id="patchDetailsModal" tabindex="-1" aria-labelledby="patch-details-title" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable"><div class="modal-content">
+        <div class="modal-header"><div class="deploy-details-heading"><h5 class="modal-title" id="patch-details-title"></h5><p id="patch-details-subtitle" class="modal-subtitle"></p></div><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
+        <div class="modal-body">
+            <dl id="patch-details-facts" class="deploy-facts"></dl>
+            <div class="deploy-details-section-head"><h6 id="patch-details-changes-title">Changes</h6></div>
+            <div id="patch-details-changes"><div class="empty-state compact">Loading…</div></div>
+        </div>
+        <div class="modal-footer"><div id="patch-details-actions" class="deploy-row-actions me-auto"></div><button type="button" class="btn btn-sm btn-ghost" data-bs-dismiss="modal">Close</button></div>
+    </div></div>
+</div>
