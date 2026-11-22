@@ -1354,3 +1354,281 @@ html:not([data-theme="dark"]) .home-search input { background:#fff; border-color
 .patch-table-wrap > .patch-table > thead > tr:first-child > :last-child { border-top-right-radius:9px; }
 .patch-table-wrap > .patch-table > tbody:last-child > tr:last-child > :first-child { border-bottom-left-radius:9px; }
 .patch-table-wrap > .patch-table > tbody:last-child > tr:last-child > :last-child { border-bottom-right-radius:9px; }
+
+/* System Logs: the sticky filter bar is a plain box (square corners) */
+.tool-page .system-log-filter-dock { border-radius:0; }
+
+/* ==========================================================================
+   Classic theme (experimental): Windows XP look — Luna blue title bars and
+   taskbar, neutral window faces, colored rounded buttons, Tahoma.
+   Selected by the header toggle (data-theme="retro"). The SQL Doc database
+   diagram canvas keeps the modern look.
+   ========================================================================== */
+html[data-theme="retro"], html[data-theme="retro"] .tool-page {
+  --ink:#000; --muted:#333; --line:#9a9a9a; --surface:#f6f6f6; --surface-soft:#efefef; --surface-hover:#eeeeee;
+  --canvas:#5c5c5c; --brand:#333333; --brand-dark:#1a1a1a; --section-head:#f6f6f6; --section-shadow:2px 3px 8px rgba(0,0,0,.28); --shadow:none;
+  --bs-border-color:#8a8a8a; --bs-body-color:#000; --bs-secondary-color:#333; --bs-body-bg:#f6f6f6;
+  --xp-window:#f6f6f6; --xp-frame:#1a1a1a; --xp-field:#8a8a8a; --xp-select:#333333;
+  --xp-title:linear-gradient(180deg,#0997ff 0%,#0053ee 8%,#0050ee 40%,#0066ff 88%,#0066ff 93%,#005bff 95%,#003dd7 96%,#003dd7 100%);
+  --xp-taskbar:linear-gradient(180deg,#3168d5 0%,#4993e6 3%,#2157d7 6%,#2663e0 10%,#245edb 92%,#1941a5 100%);
+  --xp-button:linear-gradient(180deg,#ffffff 0%,#f4f4f4 45%,#e3e8f1 85%,#cfd7e5 100%);
+  --xp-blue:linear-gradient(180deg,#7db2ff 0%,#3c86f5 45%,#2b2b2b 100%);
+  --xp-green:linear-gradient(180deg,#7bd36d 0%,#3cae3c 45%,#238a23 100%);
+  --xp-red:linear-gradient(180deg,#ff8f7d 0%,#e2492f 45%,#b8250f 100%);
+  --xp-orange:linear-gradient(180deg,#ffd27a 0%,#f5a623 50%,#d9820b 100%);
+  color-scheme:light;
+}
+html[data-theme="retro"] body { background:linear-gradient(180deg,#5c5c5c 0%,#5b8fcf 55%,#7aa7da 100%) fixed !important; color:#000; font-family:Tahoma,Verdana,"Segoe UI",Geneva,sans-serif; }
+html[data-theme="retro"] a:not(.btn):not(.home-tool):not(.brand) { color:#000000; }
+
+/* Text straight on the blue desktop is white */
+html[data-theme="retro"] :not(.sql-diagram-canvas *):is(.tool-heading h1, .tool-heading p, .tool-heading .eyebrow, .home-head h1, .home-head p, .home-group-title, .tool-breadcrumb li, .tool-breadcrumb [aria-current="page"], .home-empty) { color:#fff !important; text-shadow:1px 1px 2px rgba(0,0,0,.55); }
+html[data-theme="retro"] :not(.sql-diagram-canvas *):is(.tool-breadcrumb a, .tool-breadcrumb button:not(:disabled)) { color:#fff !important; text-decoration:underline; }
+
+/* Taskbar header */
+html[data-theme="retro"] :not(.sql-diagram-canvas *):is(.site-header, body:has(.tool-page) .site-header, body:has(.home) .site-header) { background:var(--xp-taskbar) !important; backdrop-filter:none; border-bottom:1px solid #000000 !important; box-shadow:none !important; }
+html[data-theme="retro"] .site-header .brand, html[data-theme="retro"] .site-header .brand span { color:#fff; font-weight:700; text-shadow:1px 1px 1px rgba(0,0,0,.4); }
+html[data-theme="retro"] .site-header .brand-mark { background:var(--xp-green); border:1px solid #1c5e1c; border-radius:0 9px 9px 0; box-shadow:none; color:#fff; font-style:italic; }
+html[data-theme="retro"] :not(.sql-diagram-canvas *):is(.privacy-note, .signed-in-user) { color:#fff; }
+
+/* Windows: light face, blue frame, rounded top corners, title bar */
+html[data-theme="retro"] :not(.sql-diagram-canvas *):is(.content-section, .tool-card, .deploy-card, .db-compare-panel, .sql-source-panel, .chart-panel, .deploy-detail-bar, .system-page-heading.has-back, .home-tool, .modal-content) {
+  background:var(--xp-window) !important; color:#000; border:2px solid var(--xp-frame) !important; border-radius:8px 8px 3px 3px !important; box-shadow:var(--section-shadow) !important;
+}
+html[data-theme="retro"] :not(.sql-diagram-canvas *):is(.stat-card, .system-log-filter-dock, .deploy-run-options, .patch-option, .patch-asof, .deploy-version-option, .dc-toolbar) {
+  background:#fff !important; border:1px solid var(--line) !important; box-shadow:none !important;
+}
+html[data-theme="retro"] .system-log-filter-dock { border-radius:0 !important; background:#f0f0f0 !important; }
+html[data-theme="retro"] :not(.sql-diagram-canvas *):is(.content-section > .section-heading, .content-section > .list-heading, .deploy-card > .deploy-card-head, .deploy-card > .patch-toolbar, .tool-card > .card-toolbar, .modal-header) {
+  background:var(--xp-title) !important; color:#fff !important; border:0 !important; border-radius:6px 6px 0 0 !important;
+}
+html[data-theme="retro"] .deploy-upload-section > .deploy-card-head { background:transparent !important; border-radius:0 !important; }
+html[data-theme="retro"] .deploy-upload-section > .deploy-card-head * { color:#000 !important; text-shadow:none !important; }
+html[data-theme="retro"] :not(.sql-diagram-canvas *):is(.section-heading, .list-heading, .deploy-card-head, .patch-toolbar-title, .modal-header) :is(h2, h3, h5, p, span, small, label, .modal-title, .modal-subtitle),
+html[data-theme="retro"] .patch-compare > span { color:#fff !important; text-shadow:1px 1px 1px rgba(0,0,0,.45); }
+html[data-theme="retro"] :not(.sql-diagram-canvas *):is(.section-heading, .deploy-card-head, .patch-toolbar-title, .list-heading) :is(h2, h3)::before { display:none !important; }
+html[data-theme="retro"] :not(.sql-diagram-canvas *):is(.section-heading, .deploy-card-head, .patch-toolbar-title, .list-heading) :is(h2, h3) { padding-left:0 !important; font-weight:700; }
+html[data-theme="retro"] .modal-header .btn-close { opacity:1; background-color:#e2492f; background-image:var(--bs-btn-close-bg); filter:none; border:1px solid #fff; border-radius:3px; padding:.4rem; background-size:.6rem;
+  --bs-btn-close-bg:url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='%23fff'%3e%3cpath d='M.293.293a1 1 0 0 1 1.414 0L8 6.586 14.293.293a1 1 0 1 1 1.414 1.414L9.414 8l6.293 6.293a1 1 0 0 1-1.414 1.414L8 9.414l-6.293 6.293a1 1 0 0 1-1.414-1.414L6.586 8 .293 1.707a1 1 0 0 1 0-1.414z'/%3e%3c/svg%3e"); }
+html[data-theme="retro"] .modal-footer { background:#efefef !important; border-top:1px solid var(--line) !important; border-radius:0 0 1px 1px !important; }
+html[data-theme="retro"] #deployRunModal .modal-body { background:#efefef !important; }
+html[data-theme="retro"] .modal-backdrop.show { opacity:.3; }
+
+/* Deploy dialog modules: group boxes with a light blue header */
+html[data-theme="retro"] .deploy-run-module { background:#fff !important; border:1px solid var(--line) !important; border-radius:4px !important; box-shadow:none !important; }
+html[data-theme="retro"] .deploy-run-module > header { background:linear-gradient(180deg,#f7f9fd,#e4e4e4) !important; border-bottom:1px solid var(--line) !important; border-radius:3px 3px 0 0 !important; }
+html[data-theme="retro"] .deploy-run-module > header .form-check-label :is(strong, small) { color:#1a1a1a !important; text-shadow:none; }
+
+/* Buttons: XP rounded buttons — silver by default, colored by role */
+html[data-theme="retro"] :not(.sql-diagram-canvas *):is(.btn, .back-button, .theme-toggle, .icon-button, .dc-btn, .patch-change-chip) {
+  background:var(--xp-button) !important; color:#000 !important; border:1px solid #555555 !important; border-radius:3px !important;
+  box-shadow:inset 0 -1px 0 rgba(0,0,0,.08) !important; text-shadow:none; font-family:Tahoma,Verdana,sans-serif; transform:none !important;
+}
+html[data-theme="retro"] :not(.sql-diagram-canvas *):is(.btn, .back-button, .theme-toggle, .icon-button, .dc-btn, .patch-change-chip):hover:not(:disabled) { box-shadow:inset 0 0 0 2px #f8b636 !important; }
+html[data-theme="retro"] :not(.sql-diagram-canvas *):is(.btn, .back-button, .theme-toggle, .icon-button, .dc-btn, .patch-change-chip):active:not(:disabled),
+html[data-theme="retro"] :not(.sql-diagram-canvas *):is(.patch-change-chip.active, .dc-btn.active, .deploy-file-tag.active) { background:linear-gradient(180deg,#cfd7e5,#e9eef6) !important; box-shadow:inset 0 0 0 2px #999999 !important; }
+html[data-theme="retro"] :not(.sql-diagram-canvas *):is(.btn-primary, .btn-deploy-gradient, .log-index-btn, .deploy-btn-modules, .btn-soft-primary, .dc-btn-primary) { background:var(--xp-blue) !important; color:#fff !important; border-color:#000000 !important; font-weight:700; text-shadow:0 1px 1px rgba(0,0,0,.35); }
+html[data-theme="retro"] :not(.sql-diagram-canvas *):is(.btn-success, .btn-soft-success, .package-deploy) { background:var(--xp-green) !important; color:#fff !important; border-color:#1c5e1c !important; font-weight:700; text-shadow:0 1px 1px rgba(0,0,0,.35); }
+html[data-theme="retro"] :not(.sql-diagram-canvas *):is(.btn-danger, .package-rollback) { background:var(--xp-red) !important; color:#fff !important; border-color:#7a1508 !important; font-weight:700; text-shadow:0 1px 1px rgba(0,0,0,.35); }
+html[data-theme="retro"] :not(.sql-diagram-canvas *):is(.btn-outline-danger, .btn-soft-danger, .text-danger.btn, .btn-ghost.text-danger) { color:#b8250f !important; font-weight:700; }
+html[data-theme="retro"] :not(.sql-diagram-canvas *):is(.btn-outline-primary) { color:#1a1a1a !important; font-weight:700; }
+html[data-theme="retro"] :not(.sql-diagram-canvas *):is(.btn, .back-button, .icon-button, .dc-btn):disabled, html[data-theme="retro"] .btn.disabled { background:#f2f2f2 !important; color:#a0a4ab !important; border-color:#cfcfcf !important; text-shadow:none; opacity:1; }
+html[data-theme="retro"] .deploy-count-badge { background:#fff !important; color:#1a1a1a !important; }
+html[data-theme="retro"] .theme-toggle { color:#000 !important; }
+
+/* Fields: XP text boxes */
+html[data-theme="retro"] :not(.sql-diagram-canvas *):is(.form-control, .form-select, .home-search input, textarea, input[type="text"], input[type="search"], input[type="datetime-local"], input[type="number"]) {
+  background-color:#fff !important; color:#000 !important; font-family:Tahoma,Verdana,sans-serif; border:1px solid var(--xp-field) !important; border-radius:0 !important; box-shadow:none !important;
+}
+html[data-theme="retro"] .code-input { font-family:"Courier New",Consolas,monospace !important; }
+html[data-theme="retro"] :not(.sql-diagram-canvas *):is(.form-control, .form-select):focus { border-color:var(--xp-select) !important; box-shadow:0 0 0 2px rgba(0,0,0,.2) !important; }
+html[data-theme="retro"] .form-check-input { border:1px solid #333333; background-color:#fff; border-radius:2px; }
+html[data-theme="retro"] .form-check-input[type="radio"] { border-radius:50%; }
+html[data-theme="retro"] .form-check-input:checked { background-color:#fff; border-color:#333333;
+  --bs-form-check-bg-image:url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3e%3cpath fill='none' stroke='%2321a121' stroke-linecap='round' stroke-width='3.2' d='m5 10 3 3 7-7'/%3e%3c/svg%3e"); }
+html[data-theme="retro"] .form-check-input[type="radio"]:checked { --bs-form-check-bg-image:url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -4 8 8'%3e%3ccircle r='2.2' fill='%2321a121'/%3e%3c/svg%3e"); }
+html[data-theme="retro"] :not(.sql-diagram-canvas *):is(.field-label, .form-text) { color:#000 !important; }
+
+/* Options (Partial update / Whole package, .zip / .7z): white tiles, the chosen one highlighted blue */
+html[data-theme="retro"] .dc-segmented-modes span { background:#fff !important; color:#000 !important; border:1px solid var(--line) !important; border-radius:3px !important; }
+html[data-theme="retro"] .dc-segmented-modes span :is(strong, small) { color:#000 !important; }
+html[data-theme="retro"] .dc-segmented-modes input:checked + span { background:#e0e0e0 !important; border-color:var(--xp-select) !important; box-shadow:inset 0 0 0 1px var(--xp-select) !important; }
+
+/* Lists and tables: white list views; navigation rows highlight in XP selection blue */
+html[data-theme="retro"] :not(.sql-diagram-canvas *):is(.system-row, .deploy-package-row, .deploy-module-row, .sql-source-row, .source-item, .patch-check-item) { background:#fff !important; border:1px solid #d0d0d0 !important; box-shadow:none !important; color:#000; }
+html[data-theme="retro"] :not(.sql-diagram-canvas *):is(.system-row, .sql-source-row):is(:hover, :focus-visible) { background:var(--xp-select) !important; border-color:var(--xp-select) !important; }
+html[data-theme="retro"] :not(.sql-diagram-canvas *):is(.system-row, .sql-source-row):is(:hover, :focus-visible) * { color:#fff !important; }
+html[data-theme="retro"] :not(.sql-diagram-canvas *):is(.deploy-package-row:hover, .patch-click-row:hover > td, .patch-module-row:hover > td) { background:#eeeeee !important; }
+html[data-theme="retro"] :not(.sql-diagram-canvas *):is(.patch-table-wrap, .table-responsive, .patch-check-list, .deploy-tree-wrap, .ssms-object-tree) { background:#fff !important; border:1px solid var(--xp-field) !important; box-shadow:none !important; }
+html[data-theme="retro"] :not(.sql-diagram-canvas *):is(.patch-table, .table) { background:#fff; --bs-table-bg:#fff; --bs-table-border-color:#e2e2e2; color:#000; }
+html[data-theme="retro"] :not(.sql-diagram-canvas *):is(.patch-table, .table) thead th { background:linear-gradient(180deg,#ffffff,#ececec) !important; color:#000 !important; border-color:#c8c8c8 !important; text-transform:none; letter-spacing:0; font-weight:700; }
+html[data-theme="retro"] :not(.sql-diagram-canvas *):is(.patch-group-row th) { background:linear-gradient(180deg,#f5f5f5,#e4e4e4) !important; color:#1a1a1a !important; }
+html[data-theme="retro"] .patch-folder-row td { background:#f4f4f4 !important; }
+html[data-theme="retro"] :not(.sql-diagram-canvas *):is(.patch-table, .table) td { border-color:#e2e2e2 !important; background:#fff; }
+
+/* Labels, empty areas, progress and messages */
+html[data-theme="retro"] .badge-soft { background:#fff !important; color:#1a1a1a !important; border:1px solid var(--line) !important; }
+html[data-theme="retro"] .empty-state { background:#fff !important; color:#333 !important; border:1px solid var(--line) !important; }
+html[data-theme="retro"] .progress { background:#fff; border:1px solid #686868; border-radius:3px; }
+html[data-theme="retro"] .progress-bar { background:repeating-linear-gradient(90deg,#2fb82f 0 8px,#fff 8px 10px) !important; }
+html[data-theme="retro"] .app-toast-container .toast { border-radius:6px !important; border:1px solid rgba(0,0,0,.35) !important; box-shadow:2px 3px 8px rgba(0,0,0,.3) !important; font-family:Tahoma,Verdana,sans-serif; }
+html[data-theme="retro"] .app-toast-container .toast.app-toast-success { background:var(--xp-green) !important; color:#fff !important; }
+html[data-theme="retro"] .app-toast-container .toast.app-toast-error { background:var(--xp-red) !important; color:#fff !important; }
+
+/* Home: tool tiles are small windows with a blue frame */
+html[data-theme="retro"] .home-tool::before { display:none; }
+html[data-theme="retro"] .home-tool:hover { transform:none; border-color:#f8b636 !important; }
+html[data-theme="retro"] .home-tool-icon { background:#fff !important; color:#333333 !important; box-shadow:none !important; border:1px solid var(--line); border-radius:4px !important; }
+html[data-theme="retro"] .home-tool:hover strong { color:#333333; text-decoration:underline; }
+html[data-theme="retro"] :not(.sql-diagram-canvas *):is(.home-tool-desc, .home-tool-go) { color:#222 !important; }
+html[data-theme="retro"] .home-tool-tags span { background:#f0f0f0 !important; color:#1a1a1a !important; border:1px solid #c8c8c8; }
+html[data-theme="retro"] .home-search input { border-radius:3px !important; }
+
+/* The SQL Doc database diagram canvas keeps the modern look in every theme */
+html[data-theme="retro"] .sql-diagram-canvas { font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif; }
+
+/* Modern theme: no drop shadows anywhere (borders separate the surfaces). Focus rings and the diagram's change outlines stay. */
+html:not([data-theme="retro"]), html:not([data-theme="retro"]) .tool-page { --shadow:none; --section-shadow:none; --bs-box-shadow:none; --bs-box-shadow-sm:none; --bs-box-shadow-lg:none; --bs-dropdown-box-shadow:none; }
+html:not([data-theme="retro"]) :is(
+  .brand-mark, .brand-mark span, .site-header, .site-header .brand-mark, .theme-toggle,
+  .tool-card, .system-list-rows, .content-section, .tool-home-card, .sql-source-panel, .sql-doc-workspace, .chart-panel, .stat-card,
+  .db-compare-panel, .db-compare-toolbar, .db-compare-pane, .deploy-card, .deploy-detail-bar, .system-page-heading, .deploy-run-module,
+  .system-log-filter-dock, .log-filter-more-panel, .diagram-table, .diagram-canvas-toolbar, .diagram-color-popover, .dropdown-menu,
+  .home-tool, .home-tool:hover, .login-card, .modal-content, .toast, .deploy-status,
+  .btn, .back-button, .deploy-btn-modules, .log-index-btn, .btn-deploy-gradient, .btn-primary, .log-index-btn:hover, .btn-deploy-gradient:hover
+):not(:focus-visible) { box-shadow:none !important; }
+html:not([data-theme="retro"]) .diagram-table.has-schema-change { box-shadow:0 0 0 2px #f59e0b !important; }
+html:not([data-theme="retro"]) .diagram-table.table-deleted { box-shadow:0 0 0 2px var(--danger) !important; }
+
+/* Classic: preview filter tags look like small buttons (kept out of the shared button rule so it doesn't outrank the colored buttons) */
+html[data-theme="retro"] .deploy-preview-counts .deploy-file-tag { border:1px solid #555555 !important; border-radius:3px !important; }
+/* Classic: the upload card's title sits on the window face, not in a title bar */
+html[data-theme="retro"] .deploy-card.deploy-upload-section > .deploy-card-head :is(h3, span, small, p) { color:#000 !important; text-shadow:none !important; }
+
+/* Classic, simplified: flat solid colors — no gradients, bevels, glows or shadows, square corners */
+html[data-theme="retro"], html[data-theme="retro"] .tool-page {
+  --xp-title:#1a1a1a; --xp-taskbar:#1f1f1f; --xp-button:#efefef; --xp-blue:#2b2b2b; --xp-green:#2a8a2a; --xp-red:#c0331c; --xp-orange:#d9820b;
+  --section-shadow:none;
+}
+html[data-theme="retro"] body { background:#5c5c5c !important; }
+html[data-theme="retro"] :not(.sql-diagram-canvas *):is(*, *::before, *::after) { text-shadow:none !important; }
+html[data-theme="retro"] :not(.sql-diagram-canvas *):is(.content-section, .tool-card, .deploy-card, .db-compare-panel, .sql-source-panel, .chart-panel, .deploy-detail-bar, .system-page-heading.has-back, .home-tool, .modal-content, .stat-card, .system-log-filter-dock, .deploy-run-options, .patch-option, .patch-asof, .deploy-version-option, .dc-toolbar, .deploy-run-module) {
+  border-radius:0 !important; box-shadow:none !important;
+}
+html[data-theme="retro"] :not(.sql-diagram-canvas *):is(.content-section, .tool-card, .deploy-card, .db-compare-panel, .sql-source-panel, .chart-panel, .deploy-detail-bar, .system-page-heading.has-back, .home-tool, .modal-content) { border:1px solid #1a1a1a !important; }
+html[data-theme="retro"] :not(.sql-diagram-canvas *):is(.content-section > .section-heading, .content-section > .list-heading, .deploy-card > .deploy-card-head, .deploy-card > .patch-toolbar, .tool-card > .card-toolbar, .modal-header) { border-radius:0 !important; }
+html[data-theme="retro"] .modal-footer { border-radius:0 !important; }
+html[data-theme="retro"] .modal-header .btn-close { border-radius:0; }
+html[data-theme="retro"] .site-header .brand-mark { background:#2a8a2a; border-radius:0; font-style:normal; }
+html[data-theme="retro"] .deploy-run-module > header { background:#ececec !important; border-radius:0 !important; }
+/* Buttons: flat fills with a 1px border; hover darkens the border, pressed darkens the fill */
+html[data-theme="retro"] :not(.sql-diagram-canvas *):is(.btn, .back-button, .theme-toggle, .icon-button, .dc-btn, .patch-change-chip) {
+  border-radius:0 !important; box-shadow:none !important; border:1px solid #6b6b6b !important;
+}
+html[data-theme="retro"] :not(.sql-diagram-canvas *):is(.btn, .back-button, .theme-toggle, .icon-button, .dc-btn, .patch-change-chip):hover:not(:disabled) { box-shadow:none !important; border-color:#000 !important; }
+html[data-theme="retro"] :not(.sql-diagram-canvas *):is(.btn, .back-button, .theme-toggle, .icon-button, .dc-btn, .patch-change-chip):active:not(:disabled),
+html[data-theme="retro"] :not(.sql-diagram-canvas *):is(.patch-change-chip.active, .dc-btn.active, .deploy-file-tag.active) { background:#d6d6d6 !important; box-shadow:none !important; }
+html[data-theme="retro"] :not(.sql-diagram-canvas *):is(.btn-primary, .btn-deploy-gradient, .log-index-btn, .deploy-btn-modules, .btn-soft-primary, .dc-btn-primary) { border-color:#000000 !important; }
+html[data-theme="retro"] :not(.sql-diagram-canvas *):is(.btn-success, .btn-soft-success, .package-deploy) { border-color:#1c5e1c !important; }
+html[data-theme="retro"] :not(.sql-diagram-canvas *):is(.btn-danger, .package-rollback) { border-color:#7a1508 !important; }
+html[data-theme="retro"] .deploy-preview-counts .deploy-file-tag { border-radius:0 !important; }
+/* Fields, options, tables, labels and messages: flat */
+html[data-theme="retro"] :not(.sql-diagram-canvas *):is(.form-control, .form-select, .home-search input, textarea, input[type="text"], input[type="search"], input[type="datetime-local"], input[type="number"]) { border-radius:0 !important; box-shadow:none !important; }
+html[data-theme="retro"] .form-check-input:not([type="radio"]) { border-radius:0; }
+html[data-theme="retro"] .dc-segmented-modes span { border-radius:0 !important; }
+html[data-theme="retro"] .dc-segmented-modes input:checked + span { box-shadow:none !important; border:1px solid #1a1a1a !important; }
+html[data-theme="retro"] :not(.sql-diagram-canvas *):is(.patch-table, .table) thead th { background:#e6e6e6 !important; }
+html[data-theme="retro"] :not(.sql-diagram-canvas *):is(.patch-group-row th) { background:#ececec !important; }
+html[data-theme="retro"] :not(.sql-diagram-canvas *):is(.patch-table-wrap, .table-responsive, .patch-check-list, .deploy-tree-wrap, .ssms-object-tree, .system-row, .deploy-package-row, .deploy-module-row, .sql-source-row, .source-item, .patch-check-item, .empty-state, .deploy-status, .patch-tag, .deploy-chip, .patch-chip, .badge, .badge-soft, .patch-format, .deploy-same-chip, .home-count, .home-tool-tags span, .home-tool-icon, .home-search input) { border-radius:0 !important; box-shadow:none !important; }
+html[data-theme="retro"] .progress { border-radius:0; }
+html[data-theme="retro"] .progress-bar { background:#2a8a2a !important; }
+html[data-theme="retro"] .app-toast-container .toast { border-radius:0 !important; box-shadow:none !important; border:1px solid #000 !important; }
+html[data-theme="retro"] .app-toast-icon { border-radius:0 !important; }
+html[data-theme="retro"] :is(.theme-toggle, .back-button) { border-radius:0 !important; }
+/* No rounded corners anywhere, in both themes */
+*, *::before, *::after { border-radius:0 !important; }
+html[data-theme="retro"] .log-filter-more-panel { box-shadow:none !important; border:1px solid #1a1a1a !important; }
+/* Classic: breadcrumb on a white bar with black text, links underlined */
+html[data-theme="retro"] .tool-breadcrumb { display:inline-block; padding:.3rem .65rem; border:1px solid #1a1a1a; background:#fff; }
+html[data-theme="retro"] :not(.sql-diagram-canvas *):is(.tool-page .tool-breadcrumb li, .tool-page .tool-breadcrumb [aria-current="page"], .tool-page .tool-breadcrumb a, .tool-page .tool-breadcrumb button) { color:#000 !important; }
+html[data-theme="retro"] :not(.sql-diagram-canvas *):is(.tool-page .tool-breadcrumb a, .tool-page .tool-breadcrumb button:not(:disabled)) { text-decoration:underline; font-weight:700; }
+html[data-theme="retro"] .tool-page .tool-breadcrumb li + li::before { color:#555; }
+/* Classic readability fixes */
+html[data-theme="retro"] :not(.sql-diagram-canvas *):is(.deploy-card.deploy-upload-section > .deploy-card-head) { background:transparent !important; }
+html[data-theme="retro"], html[data-theme="retro"] .tool-page { --xp-green:#1f6e1f; --xp-red:#a62a17; }
+html[data-theme="retro"] .site-header .brand-mark { background:#1f6e1f; }
+html[data-theme="retro"] .deploy-status.deploy-status-deployed { background:#1f6e1f !important; color:#fff !important; }
+html[data-theme="retro"] .deploy-status.deploy-status-rolledback { background:#8a4d00 !important; color:#fff !important; }
+html[data-theme="retro"] .deploy-run-module > header code { color:#000 !important; }
+html[data-theme="retro"] .deploy-version-icon { color:#fff !important; background:#333 !important; }
+html[data-theme="retro"] .deploy-run-warning-icon, html[data-theme="retro"] .home-search-icon { color:#000 !important; }
+html[data-theme="retro"] .modal-header :is(.patch-tag, .deploy-status) { background:#fff !important; color:#000 !important; border:1px solid #000 !important; }
+
+/* Classic, lighter monochrome: silver desktop, medium-gray bars and frames (instead of near-black) */
+html[data-theme="retro"], html[data-theme="retro"] .tool-page {
+  --xp-title:#6e6e6e; --xp-taskbar:#666666; --xp-blue:#5f5f5f; --xp-select:#6e6e6e; --xp-frame:#7a7a7a; --brand:#5f5f5f; --brand-dark:#4a4a4a; --canvas:#c4c4c4;
+}
+html[data-theme="retro"] body { background:#c4c4c4 !important; }
+html[data-theme="retro"] :is(.site-header, body:has(.tool-page) .site-header, body:has(.home) .site-header) { border-bottom-color:#4a4a4a !important; }
+html[data-theme="retro"] :not(.sql-diagram-canvas *):is(.content-section, .tool-card, .deploy-card, .db-compare-panel, .sql-source-panel, .chart-panel, .deploy-detail-bar, .system-page-heading.has-back, .home-tool, .modal-content) { border-color:#7a7a7a !important; }
+html[data-theme="retro"] .log-filter-more-panel { border-color:#7a7a7a !important; }
+html[data-theme="retro"] .dc-segmented-modes input:checked + span { border-color:#5f5f5f !important; }
+html[data-theme="retro"] .tool-breadcrumb { border-color:#7a7a7a; }
+/* Text placed straight on the silver desktop is black */
+html[data-theme="retro"] :not(.sql-diagram-canvas *):is(.app-shell .tool-heading h1, .app-shell .tool-heading p, .app-shell .tool-heading .eyebrow, .app-shell .home-head h1, .app-shell .home-head p, .app-shell .home-group-title, .app-shell .home-empty) { color:#000 !important; }
+/* Section headings outside a title bar (for example inside SQL Doc's detail cards) keep dark text */
+html[data-theme="retro"] :not(.sql-diagram-canvas *):is(:not(.content-section) > .section-heading :is(h2, h3, p, span, small, label), :not(.content-section) > .list-heading :is(h2, h3, p, span, small)) { color:#000 !important; }
+html[data-theme="retro"] :not(.sql-diagram-canvas *):is(.modal-header .patch-tag, .modal-header .deploy-status) { background:#fff !important; color:#000 !important; border:1px solid #000 !important; }
+html[data-theme="retro"] .row-arrow { color:#333 !important; }
+/* Modern readability fixes: darker teal for small text on gray, readable empty-state text, darker logo tile */
+html:not([data-theme="retro"]) .tool-page :is(.eyebrow, .tool-breadcrumb a) { color:#05645c !important; }
+html:not([data-theme="retro"]) .tool-page .empty-state { color:#475467 !important; opacity:1; }
+html:not([data-theme="retro"]) .site-header .brand-mark { background:#087d73; }
+html:not([data-theme="retro"]) .btn-primary { --bs-btn-bg:#087d73; --bs-btn-border-color:#087d73; --bs-btn-hover-bg:#06665e; --bs-btn-hover-border-color:#06665e; --bs-btn-active-bg:#055750; --bs-btn-active-border-color:#055750; --bs-btn-disabled-bg:#087d73; --bs-btn-disabled-border-color:#087d73; }
+html:not([data-theme="retro"]) .btn-outline-primary { --bs-btn-color:#087d73; --bs-btn-border-color:#087d73; --bs-btn-hover-bg:#087d73; --bs-btn-hover-border-color:#087d73; }
+
+/* Classic, with fun: the Windows 16-color palette as accents on the silver base (solid colors, no gradients) */
+html[data-theme="retro"], html[data-theme="retro"] .tool-page {
+  --c16-navy:#000080; --c16-teal:#008080; --c16-purple:#800080; --c16-maroon:#800000; --c16-olive:#5c5c00; --c16-green:#007000; --c16-blue:#0000c0;
+  --xp-taskbar:#008080; --xp-title:#000080; --xp-blue:#007070; --xp-green:#007000; --xp-red:#800000; --xp-select:#000080; --brand:#008080; --brand-dark:#006060;
+}
+html[data-theme="retro"] :is(.site-header, body:has(.tool-page) .site-header, body:has(.home) .site-header) { border-bottom-color:#004040 !important; }
+/* Logo: the four classic Windows colors around a white tile */
+html[data-theme="retro"] .site-header .brand-mark { background:#fff; color:#000; border-style:solid; border-width:3px; border-color:#c00000 #008000 #c0a000 #0000c0; }
+/* Title bars take turns through the palette */
+html[data-theme="retro"] :not(.sql-diagram-canvas *):is(:is(.content-section, .deploy-card, .tool-card):nth-of-type(5n+2) > :is(.section-heading, .list-heading, .deploy-card-head, .patch-toolbar, .card-toolbar)) { background:var(--c16-teal) !important; }
+html[data-theme="retro"] :not(.sql-diagram-canvas *):is(:is(.content-section, .deploy-card, .tool-card):nth-of-type(5n+3) > :is(.section-heading, .list-heading, .deploy-card-head, .patch-toolbar, .card-toolbar)) { background:var(--c16-purple) !important; }
+html[data-theme="retro"] :not(.sql-diagram-canvas *):is(:is(.content-section, .deploy-card, .tool-card):nth-of-type(5n+4) > :is(.section-heading, .list-heading, .deploy-card-head, .patch-toolbar, .card-toolbar)) { background:var(--c16-maroon) !important; }
+html[data-theme="retro"] :not(.sql-diagram-canvas *):is(:is(.content-section, .deploy-card, .tool-card):nth-of-type(5n+5) > :is(.section-heading, .list-heading, .deploy-card-head, .patch-toolbar, .card-toolbar)) { background:var(--c16-olive) !important; }
+html[data-theme="retro"] :not(.sql-diagram-canvas *):is(.deploy-card.deploy-upload-section > .deploy-card-head) { background:transparent !important; }
+html[data-theme="retro"] .modal-header { background:var(--c16-navy) !important; }
+/* Status labels in classic colors */
+html[data-theme="retro"] .deploy-status { color:#fff !important; }
+html[data-theme="retro"] .deploy-status.deploy-status-uploaded, html[data-theme="retro"] .deploy-status.deploy-status-ready { background:var(--c16-blue) !important; }
+html[data-theme="retro"] .deploy-status.deploy-status-deployed { background:var(--c16-green) !important; }
+html[data-theme="retro"] .deploy-status.deploy-status-rolledback { background:var(--c16-olive) !important; }
+html[data-theme="retro"] :is(.deploy-status.deploy-status-failed, .deploy-status.deploy-status-restored) { background:var(--c16-maroon) !important; }
+html[data-theme="retro"] .patch-tag.ok { background:#c0ffc0 !important; color:#004000 !important; }
+html[data-theme="retro"] .patch-tag.info { background:#c0c0ff !important; color:#000060 !important; }
+html[data-theme="retro"] .patch-tag.warn { background:#ffff80 !important; color:#404000 !important; }
+html[data-theme="retro"] .patch-count.added { color:#007000 !important; } html[data-theme="retro"] .patch-count.changed { color:#0000c0 !important; } html[data-theme="retro"] .patch-count.deleted { color:#a00000 !important; }
+/* Home: each tool's icon tile in its own classic color */
+html[data-theme="retro"] .home-tool-icon { color:#fff !important; border:1px solid #000 !important; }
+html[data-theme="retro"] .home-tool.tone-1 .home-tool-icon { background:var(--c16-teal) !important; }
+html[data-theme="retro"] .home-tool.tone-2 .home-tool-icon { background:var(--c16-maroon) !important; }
+html[data-theme="retro"] .home-tool.tone-3 .home-tool-icon { background:var(--c16-purple) !important; }
+html[data-theme="retro"] .home-tool.tone-4 .home-tool-icon { background:var(--c16-navy) !important; }
+html[data-theme="retro"] .home-tool.tone-5 .home-tool-icon { background:var(--c16-olive) !important; }
+html[data-theme="retro"] .home-tool:not([class*="tone-"]) .home-tool-icon, html[data-theme="retro"] .home-tool.tone-6 .home-tool-icon { background:var(--c16-green) !important; }
+html[data-theme="retro"] .home-tool:hover { border-color:#008080 !important; }
+/* Messages and progress */
+html[data-theme="retro"] .app-toast-container .toast.app-toast-success { background:#007000 !important; }
+html[data-theme="retro"] .app-toast-container .toast.app-toast-error { background:#800000 !important; }
+html[data-theme="retro"] .progress-bar { background:#000080 !important; }
+html[data-theme="retro"] .site-header .brand .brand-mark { color:#000 !important; text-shadow:none !important; }
+/* System Logs: log messages slightly smaller than body text */
+.log-message-cell, .log-message-preview, .log-message-full { font-size:.87rem; line-height:1.45; }
+/* Classic Deploy dialog: white module headers with a clear border so each module stands apart from the gray dialog body */
+html[data-theme="retro"] .deploy-run-module > header { background:#fff !important; border-bottom:1px solid #7a7a7a !important; }
+html[data-theme="retro"] .deploy-run-module { border:1px solid #7a7a7a !important; }
+html[data-theme="retro"] #deployRunModal .modal-body { background:#d8d8d8 !important; }

@@ -122,21 +122,22 @@
   window.devTools = { byId, escapeHtml, notify, jsonRequest, highlightSyntax, appUrl, createUuid };
 
   const themeToggle = byId('theme-toggle');
+  // Two themes: the modern light one, and "Classic" — a high-contrast early-2000s desktop look.
   const applyTheme = theme => {
-    const dark = theme === 'dark';
-    document.documentElement.dataset.theme = theme;
-    document.documentElement.dataset.bsTheme = theme;
+    const classic = theme === 'retro';
+    document.documentElement.dataset.theme = classic ? 'retro' : 'light';
+    document.documentElement.dataset.bsTheme = 'light';
     if (!themeToggle) return;
-    themeToggle.querySelector('.theme-toggle-icon').textContent = dark ? '☀' : '☾';
-    themeToggle.querySelector('.theme-toggle-label').textContent = dark ? 'Light' : 'Dark';
-    themeToggle.setAttribute('aria-label', `Switch to ${dark ? 'light' : 'dark'} theme`);
-    themeToggle.setAttribute('aria-pressed', String(dark));
+    themeToggle.querySelector('.theme-toggle-icon').textContent = classic ? '◐' : '▣';
+    themeToggle.querySelector('.theme-toggle-label').textContent = classic ? 'Modern' : 'Classic';
+    themeToggle.setAttribute('aria-label', `Switch to the ${classic ? 'modern' : 'classic high-contrast'} theme`);
+    themeToggle.setAttribute('aria-pressed', String(classic));
   };
-  // Light by default regardless of the OS setting; dark only when the user chose it. The choice lives in localStorage.
-  const savedTheme = () => { try { return localStorage.getItem('devtools-theme') === 'dark' ? 'dark' : 'light'; } catch { return 'light'; } };
+  // Modern by default regardless of the OS setting; classic only when the user chose it. The choice lives in localStorage.
+  const savedTheme = () => { try { return localStorage.getItem('devtools-theme') === 'retro' ? 'retro' : 'light'; } catch { return 'light'; } };
   applyTheme(savedTheme());
   themeToggle?.addEventListener('click', () => {
-    const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+    const next = document.documentElement.dataset.theme === 'retro' ? 'light' : 'retro';
     try { localStorage.setItem('devtools-theme', next); } catch { /* storage blocked: the choice lasts for this page only */ }
     applyTheme(next);
   });

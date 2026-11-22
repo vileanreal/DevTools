@@ -88,9 +88,6 @@
     <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable"><form id="deploy-run-form" class="modal-content">
         <div class="modal-header"><div><h5 class="modal-title" id="deploy-run-title">Deploy package</h5><p id="deploy-run-subtitle" class="modal-subtitle"></p></div><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
         <div class="modal-body">
-            <ol class="deploy-run-flow" aria-label="What will happen">
-                <li>Back up</li><li>Stop all app pools and services</li><li>Patch all modules</li><li>Start them again</li>
-            </ol>
             <div id="deploy-run-modules" class="deploy-run-modules"></div>
             <div class="deploy-run-options">
                 <label class="form-check"><input id="deploy-run-autorestore" class="form-check-input" type="checkbox" checked> <span class="form-check-label"><strong>Auto-restore on failure</strong><small>If any step fails, restore every module from the backup and start the services again.</small></span></label>
