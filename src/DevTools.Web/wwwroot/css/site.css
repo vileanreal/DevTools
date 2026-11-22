@@ -1101,3 +1101,7 @@ html[data-theme="dark"] .patch-chip.latest { border-color:rgba(34,197,94,.35); b
 .deploy-tree-row.action-excluded > td:first-child,.deploy-tree-row.action-keep > td:first-child { border-left-color:#98a2b3; }
 .deploy-tree-row:not([class*="action-"]) td:first-child { padding-left:1.4rem; }
 .deploy-details-module .deploy-tree-wrap,.deploy-preview-tree .deploy-tree-wrap { margin-top:.35rem; }
+/* Deployment: the Deploy button in the deploy dialog (blue to purple) */
+#deployRunModal .btn-deploy-gradient { --bs-btn-color:#fff; --bs-btn-hover-color:#fff; --bs-btn-active-color:#fff; --bs-btn-disabled-color:#fff; min-width:96px; border:0; background:linear-gradient(135deg,#2563eb 0%,#7c3aed 100%); color:#fff; font-weight:750; box-shadow:0 4px 12px rgba(99,70,235,.3); transition:box-shadow .15s, transform .15s; }
+#deployRunModal .btn-deploy-gradient:hover:not(:disabled),#deployRunModal .btn-deploy-gradient:focus-visible { background:linear-gradient(135deg,#1d4ed8 0%,#6d28d9 100%); color:#fff; box-shadow:0 6px 16px rgba(99,70,235,.42); transform:translateY(-1px); }
+#deployRunModal .btn-deploy-gradient:disabled { background:linear-gradient(135deg,#2563eb 0%,#7c3aed 100%); color:#fff; opacity:.45; box-shadow:none; }
