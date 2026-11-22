@@ -28,11 +28,11 @@ public static class PatchDiff
             int added = 0, changed = 0, deleted = 0;
             foreach (var (path, file) in after)
             {
-                if (!before.TryGetValue(path, out var old)) { changes.Add(new(module, file.Path, PatchChangeKinds.Added, file.Size, null)); added++; }
-                else if (!string.Equals(old.Sha256, file.Sha256, StringComparison.OrdinalIgnoreCase)) { changes.Add(new(module, file.Path, PatchChangeKinds.Changed, file.Size, old.Size)); changed++; }
+                if (!before.TryGetValue(path, out var old)) { changes.Add(new(module, file.Path, PatchChangeKinds.Added, file.Size, null, file.Sha256)); added++; }
+                else if (!string.Equals(old.Sha256, file.Sha256, StringComparison.OrdinalIgnoreCase)) { changes.Add(new(module, file.Path, PatchChangeKinds.Changed, file.Size, old.Size, file.Sha256, old.Sha256)); changed++; }
             }
             foreach (var (path, old) in before)
-                if (!after.ContainsKey(path)) { changes.Add(new(module, old.Path, PatchChangeKinds.Deleted, null, old.Size)); deleted++; }
+                if (!after.ContainsKey(path)) { changes.Add(new(module, old.Path, PatchChangeKinds.Deleted, null, old.Size, null, old.Sha256)); deleted++; }
             summaries.Add(new PatchModuleChangeSummary(module, added, changed, deleted));
         }
         var ordered = changes

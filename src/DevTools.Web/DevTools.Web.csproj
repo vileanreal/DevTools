@@ -3,6 +3,13 @@
   <ItemGroup>
     <ProjectReference Include="..\DevTools.Application\DevTools.Application.csproj" />
     <ProjectReference Include="..\DevTools.Shared\DevTools.Shared.csproj" />
+    <!-- Built first so its single .exe can be copied into compiled patches (it targets .NET Framework 4.8, so it is not referenced as an assembly). -->
+    <ProjectReference Include="..\DevTools.PatchHelper\DevTools.PatchHelper.csproj" ReferenceOutputAssembly="false" SkipGetTargetFrameworkProperties="true" GlobalPropertiesToRemove="TargetFramework" Private="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Releases adds this exe (renamed per system) to every compiled patch. -->
+    <None Include="..\DevTools.PatchHelper\bin\$(Configuration)\DevTools.PatchHelper.exe" Link="PatchHelper\DevTools.PatchHelper.exe" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Visible="false" />
   </ItemGroup>
 
   <ItemGroup>

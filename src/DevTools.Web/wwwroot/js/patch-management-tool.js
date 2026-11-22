@@ -3,10 +3,13 @@
   const modal = id => bootstrap.Modal.getOrCreateInstance(byId(id));
   const systemModal = modal('patchSystemModal'), modulesModal = modal('patchModulesModal'), moduleModal = modal('patchModuleModal');
   const compileModal = modal('patchCompileModal'), latestModal = modal('patchLatestModal'), detailsModal = modal('patchDetailsModal');
+  const snapshotLatestModal = modal('patchSnapshotLatestModal'), undoModal = modal('patchUndoModal');
   let systems = [], snapshots = [], packages = [], selectedSystemId = null, editingSystemId = null, editingModuleId = null, returnToManager = false;
   // changes: the last check of the module folders. selection: module ids ticked for the next patch / set-as-latest.
   let changes = null, checking = false, selection = new Set(), selectionTouched = false, checkToken = 0;
-  const pages = { packages: { page:1, size:10 }, snapshots: { page:1, size:10 } };
+  const pages = { packages: { page:1, size:10 }, snapshots: { page:1, size:10 }, history: { page:1, size:10 } };
+  let history = [], snapshotLatestTarget = null, undoTarget = null;
+  const sourceLabels = { initial:'Recorded at start', compile:'Compiled patch', current:'Set as latest (current files)', snapshot:'Set as latest (snapshot)', patch:'Set as latest (patch)', undo:'Undo' };
 
   const selectedSystem = () => systems.find(item => item.id === selectedSystemId);
   const bytes = value => { const units = ['B','KB','MB','GB','TB']; let size = Number(value) || 0, unit = 0; while (size >= 1024 && unit < units.length - 1) { size /= 1024; unit++; } return `${size.toFixed(unit && size < 10 ? 1 : 0)} ${units[unit]}`; };
@@ -57,7 +60,8 @@
 
   const showSystem = async systemId => {
     selectedSystemId = systemId; changes = null; selection = new Set(); selectionTouched = false;
-    pages.packages.page = 1; pages.snapshots.page = 1;
+    pages.packages.page = 1; pages.snapshots.page = 1; pages.history.page = 1;
+    byId('patch-history-module').value = ''; byId('patch-history-date').value = '';
     setSystemInUrl(systemId);
     byId('patch-systems-view').classList.add('d-none'); byId('patch-system-detail').classList.remove('d-none');
     byId('patch-compare-base').value = '';
@@ -80,6 +84,10 @@
     editingSystemId = system?.id ?? null;
     byId('patch-system-name-input').value = system?.name ?? '';
     byId('patch-system-output-input').value = system?.outputDirectory ?? '';
+    byId('patch-system-helper-title').value = system?.helperTitle ?? '';
+    byId('patch-system-helper-subtitle').value = system?.helperSubtitle ?? '';
+    byId('patch-system-support').value = system?.supportContact ?? '';
+    byId('patch-system-helper-file').value = system?.helperFileName ?? '';
     byId('patch-system-modal-title').textContent = system ? 'Edit system' : 'Add system';
     byId('patch-system-submit').textContent = system ? 'Save changes' : 'Add system';
     systemModal.show();
@@ -87,7 +95,9 @@
 
   const saveSystem = async event => {
     event.preventDefault();
-    const body = { name:byId('patch-system-name-input').value, outputDirectory:byId('patch-system-output-input').value || null };
+    const body = { name:byId('patch-system-name-input').value, outputDirectory:byId('patch-system-output-input').value || null,
+      helperTitle:byId('patch-system-helper-title').value || null, helperSubtitle:byId('patch-system-helper-subtitle').value || null,
+      supportContact:byId('patch-system-support').value || null, helperFileName:byId('patch-system-helper-file').value || null };
     try {
       const saved = await jsonRequest(editingSystemId ? `/api/patch-management/systems/${editingSystemId}` : '/api/patch-management/systems', editingSystemId ? 'PUT' : 'POST', body);
       systemModal.hide(); await loadSystems(); notify(editingSystemId ? 'System updated.' : 'System added.');
@@ -116,7 +126,7 @@
         <td class="patch-col-check"><input class="form-check-input patch-module-check" type="checkbox" ${selection.has(module.id) ? 'checked' : ''} aria-label="Include ${escapeHtml(module.name)}"></td>
         <td><span class="patch-module-name"><strong>${escapeHtml(module.name)}</strong>${summary && !count ? '<span class="patch-tag ok">Up to date</span>' : ''}</span><code class="patch-path" title="${escapeHtml(module.sourcePath)}">${escapeHtml(module.sourcePath)}</code></td>
         <td>${module.latestAt
-          ? `<span class="patch-version-cell"><strong title="${escapeHtml(module.latestLabel || '')}">${escapeHtml(module.latestLabel || 'Latest version')}</strong><small>${when(module.latestAt)}</small>${base}</span>`
+          ? `<span class="patch-version-cell"><strong title="${escapeHtml(module.latestLabel || '')}">${escapeHtml(module.latestLabel || 'Latest version')}</strong><small>${when(module.latestAt)}</small>${module.latestRemarks ? `<small class="patch-remarks" title="${escapeHtml(`${module.latestRemarks}${module.latestChangedBy ? ` — ${module.latestChangedBy}` : ''}, ${when(module.latestChangedAt)}`)}">“${escapeHtml(module.latestRemarks)}”</small>` : ''}${base}</span>`
           : `<span class="patch-version-cell"><span class="patch-tag warn">Not set</span><small>Every file counts as added</small>${base}</span>`}</td>
         <td class="patch-col-num">${cell(summary?.added, 'added')}</td>
         <td class="patch-col-num">${cell(summary?.changed, 'changed')}</td>
@@ -174,6 +184,9 @@
     byId('patch-module-name').value = module?.name ?? '';
     byId('patch-module-source').value = module?.sourcePath ?? '';
     byId('patch-module-exclusions').value = module?.exclusions ?? '';
+    byId('patch-module-client-folder').value = module?.clientFolder ?? '';
+    byId('patch-module-app-pool').value = module?.appPoolName ?? '';
+    byId('patch-module-service').value = module?.serviceName ?? '';
     byId('patch-module-modal-title').textContent = module ? 'Edit module' : 'Add module';
     byId('patch-module-submit').textContent = module ? 'Save changes' : 'Add module';
     moduleModal.show();
@@ -181,7 +194,8 @@
 
   const saveModule = async event => {
     event.preventDefault();
-    const body = { name:byId('patch-module-name').value, sourcePath:byId('patch-module-source').value, exclusions:byId('patch-module-exclusions').value || null };
+    const body = { name:byId('patch-module-name').value, sourcePath:byId('patch-module-source').value, exclusions:byId('patch-module-exclusions').value || null,
+      clientFolder:byId('patch-module-client-folder').value || null, appPoolName:byId('patch-module-app-pool').value || null, serviceName:byId('patch-module-service').value || null };
     try {
       await jsonRequest(editingModuleId ? `/api/patch-management/systems/${selectedSystemId}/modules/${editingModuleId}` : `/api/patch-management/systems/${selectedSystemId}/modules`, editingModuleId ? 'PUT' : 'POST', body);
       moduleModal.hide(); await loadSystems(); notify(editingModuleId ? 'Module updated.' : 'Module added.');
@@ -316,11 +330,12 @@
   // ---------- Snapshots and patches ----------
   const loadHistory = async () => {
     if (!selectedSystemId) return;
-    [snapshots, packages] = await Promise.all([
+    [snapshots, packages, history] = await Promise.all([
       jsonRequest(`/api/patch-management/systems/${selectedSystemId}/snapshots`),
-      jsonRequest(`/api/patch-management/systems/${selectedSystemId}/packages`)
+      jsonRequest(`/api/patch-management/systems/${selectedSystemId}/packages`),
+      jsonRequest(`/api/patch-management/systems/${selectedSystemId}/latest-history`)
     ]);
-    renderCompareOptions(); renderSnapshots(); renderPackages();
+    renderCompareOptions(); renderSnapshots(); renderPackages(); renderHistoryFilter(); renderHistory();
   };
 
   const snapshotName = snapshot => `${snapshot.label || (snapshot.source === 'patch' ? 'Patch snapshot' : 'Snapshot')} · ${when(snapshot.createdAt)}`;
@@ -423,13 +438,92 @@
   // After a version moves, tick whichever modules still have changes again.
   const refreshAfterVersionChange = async () => { selectionTouched = false; await Promise.all([loadSystems(), loadHistory()]); await checkChanges(); };
 
-  const setSnapshotLatest = async (snapshotId, fileName) => {
+  // Setting a snapshot or patch as latest asks why (the remarks go into the version history).
+  const setSnapshotLatest = (snapshotId, fileName) => {
     const snapshot = snapshots.find(item => item.id === snapshotId);
-    const names = snapshot?.modules ?? [];
-    const what = fileName ? `the contents of ${fileName}` : 'this snapshot';
-    if (!confirm(`Make ${what} the latest version of ${listText(names) || 'its modules'}? Their changes will be measured from it; other modules keep their own version.`)) return;
-    try { await jsonRequest(`/api/patch-management/snapshots/${snapshotId}/latest`, 'POST'); notify(`Latest version updated for ${listText(names)}.`); await refreshAfterVersionChange(); }
-    catch (error) { notify(error.message, true); }
+    const names = (snapshot?.modules ?? []).filter(name => !(snapshot?.latestFor ?? []).includes(name));
+    snapshotLatestTarget = { snapshotId, names };
+    byId('patch-snapshot-latest-subtitle').textContent = fileName || (snapshot ? snapshotName(snapshot) : '');
+    byId('patch-snapshot-latest-text').textContent = `Make ${fileName ? `the contents of ${fileName}` : 'this snapshot'} the latest version of ${listText(names) || 'its modules'}? Their changes will be measured from it; other modules keep their own version.`;
+    byId('patch-snapshot-latest-remarks').value = '';
+    snapshotLatestModal.show();
+  };
+
+  const submitSnapshotLatest = async event => {
+    event.preventDefault();
+    if (!snapshotLatestTarget) return;
+    const button = byId('patch-snapshot-latest-submit'); setBusy(button, true, 'Saving');
+    try {
+      await jsonRequest(`/api/patch-management/snapshots/${snapshotLatestTarget.snapshotId}/latest`, 'POST', { remarks:byId('patch-snapshot-latest-remarks').value });
+      snapshotLatestModal.hide(); notify(`Latest version updated for ${listText(snapshotLatestTarget.names)}.`);
+      await refreshAfterVersionChange();
+    } catch (error) { notify(error.message, true); }
+    finally { setBusy(button, false); }
+  };
+
+  // ---------- Version history ----------
+  const versionName = (label, at) => label ? `${label} · ${when(at)}` : at ? when(at) : 'no version';
+  const renderHistoryFilter = () => {
+    const select = byId('patch-history-module'), previous = select.value;
+    const names = [...new Set(history.map(item => item.moduleName))].sort((a, b) => a.localeCompare(b));
+    select.innerHTML = '<option value="">All modules</option>' + names.map(name => `<option>${escapeHtml(name)}</option>`).join('');
+    if (names.includes(previous)) select.value = previous;
+  };
+
+  const renderHistory = () => {
+    const host = byId('patch-history-list'), pager = byId('patch-history-pager'), module = byId('patch-history-module').value;
+    renderAsOf();
+    const items = history.filter(item => !module || item.moduleName === module);
+    if (!items.length) { host.innerHTML = '<div class="empty-state compact">No latest-version changes recorded yet.</div>'; pager.classList.add('d-none'); return; }
+    renderPager(pager, items.length, pages.history, renderHistory);
+    host.innerHTML = `<div class="patch-table-wrap"><table class="patch-table patch-list-table patch-history-table">
+      <thead><tr><th class="patch-col-date">When</th><th>Module</th><th>Latest version</th><th>Remarks</th><th class="patch-col-actions"><span class="visually-hidden">Actions</span></th></tr></thead>
+      <tbody>${pageOf(items, pages.history).map(item => `<tr class="patch-history-row source-${item.source}">
+        <td class="patch-col-date"><span class="patch-date">${when(item.at)}${item.createdBy ? `<small>by ${escapeHtml(item.createdBy)}</small>` : ''}</span></td>
+        <td><strong>${escapeHtml(item.moduleName)}</strong></td>
+        <td><span class="patch-history-change">
+          ${item.source === 'initial' ? '' : `<span class="patch-history-from" title="Previous latest version">${escapeHtml(versionName(item.previousLabel, item.previousCreatedAt))}</span><span class="patch-history-arrow" aria-hidden="true">→</span>`}
+          <strong>${escapeHtml(item.snapshotId ? versionName(item.snapshotLabel, item.snapshotCreatedAt) : 'No version (every file counts as added)')}</strong></span>
+          <small class="patch-history-source"><span class="patch-tag ${item.source === 'undo' ? 'warn' : item.source === 'initial' ? 'muted' : 'info'}">${escapeHtml(sourceLabels[item.source] || item.source)}</span>${item.patchFileName ? ` ${escapeHtml(item.patchFileName)}` : ''}</small></td>
+        <td class="patch-history-remarks">${escapeHtml(item.remarks)}</td>
+        <td class="patch-col-actions"><span class="deploy-row-actions">${item.canUndo ? `<button class="btn btn-sm btn-soft-primary history-undo" type="button" data-event-id="${item.id}" title="Move ${escapeHtml(item.moduleName)} back to ${escapeHtml(versionName(item.previousLabel, item.previousCreatedAt))}">↶ Undo</button>` : ''}</span></td>
+      </tr>`).join('')}</tbody></table></div>`;
+    host.querySelectorAll('.history-undo').forEach(button => button.addEventListener('click', () => openUndo(history.find(item => item.id === Number(button.dataset.eventId)))));
+  };
+
+  // "Latest on <date>": for each module, the newest history entry at or before that moment.
+  const renderAsOf = () => {
+    const host = byId('patch-history-asof'), value = byId('patch-history-date').value;
+    if (!value) { host.classList.add('d-none'); host.innerHTML = ''; return; }
+    const at = new Date(value).getTime();
+    const modules = [...new Set(history.map(item => item.moduleName))].sort((a, b) => a.localeCompare(b));
+    const rows = modules.map(name => {
+      const entry = history.filter(item => item.moduleName === name && new Date(item.at).getTime() <= at)[0];
+      return `<li><strong>${escapeHtml(name)}</strong><span>${entry ? `${escapeHtml(entry.snapshotId ? versionName(entry.snapshotLabel, entry.snapshotCreatedAt) : 'No version')}<small>since ${when(entry.at)} · “${escapeHtml(entry.remarks)}”</small>` : '<span class="patch-muted">Not recorded yet at that time</span>'}</span></li>`;
+    });
+    host.innerHTML = `<div class="patch-asof-head"><strong>Latest versions on ${escapeHtml(new Date(value).toLocaleString())}</strong><button type="button" class="btn btn-sm btn-ghost" id="patch-history-date-clear">Clear</button></div><ul>${rows.join('')}</ul>`;
+    host.classList.remove('d-none');
+    byId('patch-history-date-clear').addEventListener('click', () => { byId('patch-history-date').value = ''; renderHistory(); });
+  };
+
+  const openUndo = item => {
+    if (!item) return;
+    undoTarget = item;
+    byId('patch-undo-text').textContent = `Move ${item.moduleName} back from “${versionName(item.snapshotLabel, item.snapshotCreatedAt)}” to “${versionName(item.previousLabel, item.previousCreatedAt)}”? Its pending changes will be measured from that version again.`;
+    byId('patch-undo-remarks').value = '';
+    undoModal.show();
+  };
+
+  const submitUndo = async event => {
+    event.preventDefault();
+    if (!undoTarget) return;
+    const button = byId('patch-undo-submit'); setBusy(button, true, 'Undoing');
+    try {
+      await jsonRequest(`/api/patch-management/modules/${undoTarget.moduleId}/latest/undo`, 'POST', { remarks:byId('patch-undo-remarks').value });
+      undoModal.hide(); notify(`${undoTarget.moduleName} is back on its previous version.`);
+      await refreshAfterVersionChange();
+    } catch (error) { notify(error.message, true); }
+    finally { setBusy(button, false); }
   };
 
   const deleteSnapshot = async snapshotId => {
@@ -515,12 +609,14 @@
     const submit = byId('patch-compile-submit');
     submit.disabled = !ids.length;
     submit.textContent = byId('patch-compile-latest').checked ? 'Compile and set as latest' : 'Compile';
+    byId('patch-compile-remarks-wrap').classList.toggle('d-none', !byId('patch-compile-latest').checked);
   };
 
   const openCompile = () => {
     renderCheckList('patch-compile-modules', selection);
     byId('patch-compile-label').value = '';
     byId('patch-compile-latest').checked = false;
+    byId('patch-compile-remarks').value = '';
     updateCompileSummary();
     compileModal.show();
   };
@@ -530,12 +626,14 @@
     const moduleIds = checkedIn('patch-compile-modules');
     if (!moduleIds.length) { notify('Choose at least one module.', true); return; }
     const setAsLatest = byId('patch-compile-latest').checked;
+    const latestRemarks = byId('patch-compile-remarks').value.trim();
+    if (setAsLatest && latestRemarks.length < 3) { byId('patch-compile-remarks').focus(); notify('Enter remarks: why is this patch the latest version?', true); return; }
     const button = byId('patch-compile-submit'); setBusy(button, true, 'Compiling');
     const base = byId('patch-compare-base').value;
     try {
       const result = await jsonRequest(`/api/patch-management/systems/${selectedSystemId}/compile`, 'POST', {
         format:document.querySelector('input[name="patch-format"]:checked').value, baseSnapshotId:base ? Number(base) : null,
-        label:byId('patch-compile-label').value || null, moduleIds, setAsLatest
+        label:byId('patch-compile-label').value || null, moduleIds, setAsLatest, latestRemarks:setAsLatest ? latestRemarks : null
       });
       compileModal.hide();
       notify(`${result.fileName} compiled: ${result.added} added, ${result.changed} changed, ${result.deleted} deleted${setAsLatest ? ' — now the latest version' : ''}.`);
@@ -548,6 +646,7 @@
   const openSetLatest = () => {
     renderCheckList('patch-latest-modules', selection);
     byId('patch-latest-label').value = '';
+    byId('patch-latest-remarks').value = '';
     latestModal.show();
   };
 
@@ -557,7 +656,7 @@
     if (!moduleIds.length) { notify('Choose at least one module.', true); return; }
     const button = byId('patch-latest-submit'); setBusy(button, true, 'Taking snapshot');
     try {
-      await jsonRequest(`/api/patch-management/systems/${selectedSystemId}/latest`, 'POST', { label:byId('patch-latest-label').value || null, moduleIds });
+      await jsonRequest(`/api/patch-management/systems/${selectedSystemId}/latest`, 'POST', { label:byId('patch-latest-label').value || null, moduleIds, remarks:byId('patch-latest-remarks').value });
       latestModal.hide();
       const names = selectedSystem().modules.filter(module => moduleIds.includes(module.id)).map(module => module.name);
       notify(`The current files of ${listText(names)} are now the latest version.`);
@@ -594,6 +693,10 @@
   byId('patch-compile-form').addEventListener('submit', compile);
   byId('patch-set-latest').addEventListener('click', openSetLatest);
   byId('patch-latest-form').addEventListener('submit', setCurrentLatest);
+  byId('patch-snapshot-latest-form').addEventListener('submit', submitSnapshotLatest);
+  byId('patch-undo-form').addEventListener('submit', submitUndo);
+  byId('patch-history-module').addEventListener('change', () => { pages.history.page = 1; renderHistory(); });
+  byId('patch-history-date').addEventListener('change', renderAsOf);
   loadSystems()
     .then(() => {
       const requested = Number(new URL(location.href).searchParams.get('system'));

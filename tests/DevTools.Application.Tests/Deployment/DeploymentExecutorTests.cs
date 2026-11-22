@@ -46,6 +46,53 @@ public sealed class DeploymentExecutorTests : IDisposable
     }
 
     [Fact]
+    public async Task Partial_SkipsIdenticalFiles_WithoutBackingUpOrCopyingThem()
+    {
+        var target = Folder("site", ("same.dll", "identical"), ("app.dll", "old app"), ("sized.dll", "aaaa"));
+        var staging = Folder("pkg", ("same.dll", "identical"), ("app.dll", "new app"), ("sized.dll", "bbbb"));
+        var before = new DateTime(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        File.SetLastWriteTimeUtc(Path.Combine(target, "same.dll"), before);
+        var plan = Plan(Module(target, staging, DeploymentModes.Partial, null));
+
+        var manifest = await _executor.DeployAsync(plan, new Reporter(_events), CancellationToken.None);
+
+        var module = Assert.Single(manifest.Modules);
+        Assert.Equal(["same.dll"], module.UnchangedFiles);
+        // Same size but different content is still a change.
+        Assert.Equal(["app.dll", "sized.dll"], module.BackedUpFiles);
+        Assert.Equal(["WebApi/app.dll", "WebApi/sized.dll"], BackupFiles(plan.BackupPath));
+        Assert.Equal(before, File.GetLastWriteTimeUtc(Path.Combine(target, "same.dll")));
+        Assert.Equal("bbbb", Read(target, "sized.dll"));
+        Assert.Contains(_events, item => item.Contains("1 unchanged skipped"));
+    }
+
+    [Fact]
+    public async Task Full_StillReplacesIdenticalFiles()
+    {
+        var target = Folder("site", ("same.dll", "identical"));
+        var staging = Folder("pkg", ("same.dll", "identical"));
+        var plan = Plan(Module(target, staging, DeploymentModes.Full, null));
+
+        var manifest = await _executor.DeployAsync(plan, new Reporter(_events), CancellationToken.None);
+
+        Assert.Equal(["same.dll"], Assert.Single(manifest.Modules).BackedUpFiles);
+        Assert.Null(manifest.Modules[0].UnchangedFiles);
+    }
+
+    [Fact]
+    public void ReadEntries_OpensOnlyTheWantedEntries()
+    {
+        var source = Folder("zipsrc", ("WebApi/a.txt", "alpha"), ("WebApi/b.txt", "beta"));
+        var zip = Path.Combine(_root, "pkg.zip");
+        System.IO.Compression.ZipFile.CreateFromDirectory(source, zip);
+        var read = new Dictionary<string, string>();
+
+        _archives.ReadEntries(zip, entry => entry.EndsWith("b.txt"), (entry, stream) => read[entry.Replace('\\', '/')] = new StreamReader(stream).ReadToEnd(), CancellationToken.None);
+
+        Assert.Equal(new Dictionary<string, string> { ["WebApi/b.txt"] = "beta" }, read);
+    }
+
+    [Fact]
     public async Task Partial_Rollback_RestoresReplacedFiles_AndRemovesAddedFiles()
     {
         var target = Folder("site", ("app.dll", "old app"), ("web.config", "server config"));

@@ -196,10 +196,16 @@
     if (!file || !system || upload) return;
     if (!description) { byId('deploy-upload-description').focus(); return notify('Enter a package description before uploading.', true); }
     const pending = packages.filter(item => item.status === 'Uploaded');
-    if (pending.length && !confirmed) {
-      byId('deploy-upload-confirm-text').textContent = `${system.name} already has ${plural(pending.length, 'package')} that ${pending.length === 1 ? 'hasn\'t' : 'haven\'t'} been deployed yet:`;
-      byId('deploy-upload-confirm-list').innerHTML = pending.slice(0, 8).map(item => `<li><strong>${escapeHtml(item.fileName)}</strong><span>${escapeHtml(item.description || 'No description')} · uploaded ${when(item.uploadedAt)}</span></li>`).join('')
-        + (pending.length > 8 ? `<li><span>…and ${pending.length - 8} more</span></li>` : '');
+    // Same name and size is a strong hint that this exact file was uploaded before (the server confirms it by SHA-256).
+    const likelySame = packages.filter(item => item.fileName.toLowerCase() === file.name.toLowerCase() && item.sizeBytes === file.size);
+    if ((pending.length || likelySame.length) && !confirmed) {
+      const item = entry => `<li><strong>${escapeHtml(entry.fileName)}</strong><span>${escapeHtml(entry.description || 'No description')} · uploaded ${when(entry.uploadedAt)} · ${escapeHtml(statusLabels[entry.status] || entry.status)}</span></li>`;
+      byId('deploy-upload-confirm-title').textContent = likelySame.length ? 'Upload the same file again?' : 'Upload another package?';
+      byId('deploy-upload-confirm-text').innerHTML = [
+        likelySame.length ? `<p class="deploy-confirm-warning"><span aria-hidden="true">⚠</span> A package with the same name and size (${bytes(file.size)}) was already uploaded:</p><ul class="deploy-confirm-list">${likelySame.slice(0, 5).map(item).join('')}</ul>` : '',
+        pending.length ? `<p class="mb-2">${escapeHtml(system.name)} already has ${plural(pending.length, 'package')} that ${pending.length === 1 ? 'hasn\'t' : 'haven\'t'} been deployed yet:</p><ul class="deploy-confirm-list">${pending.slice(0, 8).map(item).join('')}${pending.length > 8 ? `<li><span>…and ${pending.length - 8} more</span></li>` : ''}</ul>` : ''
+      ].join('');
+      byId('deploy-upload-confirm-list').innerHTML = '';
       uploadConfirmModal.show();
       return;
     }
@@ -225,7 +231,9 @@
       const succeeded = xhr.status >= 200 && xhr.status < 300 && result?.success;
       finishUpload(succeeded);
       if (succeeded) {
-        notify(`${file.name} uploaded. Matched ${plural(result.data.analysis.modules.length, 'module')}.`);
+        const same = result.data.sameFileAs || [];
+        if (same.length) notify(`${file.name} uploaded, but it is identical to ${same[0].fileName} uploaded ${when(same[0].uploadedAt)}${same.length > 1 ? ` (and ${same.length - 1} more)` : ''}. Delete it if it was uploaded by mistake.`, true);
+        else notify(`${file.name} uploaded. Matched ${plural(result.data.analysis.modules.length, 'module')}.`);
         await loadPackages();
       } else notify(result?.error || (xhr.status === 413 ? 'The package is larger than the server allows.' : 'The upload failed.'), true);
     });
@@ -303,6 +311,7 @@
             <strong title="${escapeHtml(item.fileName)}">${escapeHtml(item.fileName)}</strong>
             <span class="deploy-status ${statusClass(item.status)}">${escapeHtml(statusLabels[item.status] || item.status)}</span>
             <span class="deploy-package-description${item.description ? '' : ' muted'}" title="${escapeHtml(item.description || '')}">${escapeHtml(item.description || 'No description')}</span>
+            ${item.sameFileAs?.length ? `<span class="deploy-same-chip" title="Identical content (same SHA-256) to ${escapeHtml(item.sameFileAs.map(same => `${same.fileName} (${when(same.uploadedAt)})`).join(', '))}">⧉ Same file as ${escapeHtml(item.sameFileAs[0].fileName)}</span>` : ''}
           </span>
           <small class="deploy-package-meta">${bytes(item.sizeBytes)} · ${packageDates(item)}${modules ? ` · ${escapeHtml(modules)}` : ''}</small>
           ${item.error ? `<small class="deploy-package-error" title="${escapeHtml(item.error)}">${escapeHtml(item.error)}</small>` : ''}
@@ -443,7 +452,8 @@
     const facts = [
       ['System', system?.name], ['Size', bytes(item.sizeBytes)], ['Uploaded', when(item.uploadedAt)],
       ['Last deployed', deployed && when(deployed.at)], ['Last rolled back', rolledBack && when(rolledBack.at)],
-      ['Backup', item.backupFileName]
+      ['Backup', item.backupFileName],
+      ['Same file as', item.sameFileAs?.length ? item.sameFileAs.map(same => `${same.fileName} (${when(same.uploadedAt)})`).join(', ') : null]
     ].filter(([, value]) => value);
     byId('deploy-package-body').innerHTML = `
       ${item.error ? `<div class="deploy-error mb-3">${escapeHtml(item.error)}</div>` : ''}
@@ -516,7 +526,7 @@
     runModal.show();
   };
 
-  const previewLabels = { new:'New', replace:'Replace', excluded:'Excluded', delete:'Delete', keep:'Kept' };
+  const previewLabels = { new:'New', replace:'Replace', same:'Same', excluded:'Excluded', delete:'Delete', keep:'Kept' };
   const loadPreview = async section => {
     const body = section.querySelector('.deploy-preview-body');
     const request = { moduleId:Number(section.dataset.moduleId), mode:section.querySelector('input[type=radio]:checked')?.value || null, exclusions:section.querySelector('.run-exclusions').value || null };
@@ -526,7 +536,7 @@
     try {
       const result = await jsonRequest(`/api/deployment/packages/${deployPackageId}/preview`, 'POST', request);
       if (section.dataset.previewKey !== key) return;
-      const counts = [['new', result.newCount], ['replace', result.replaceCount], ['excluded', result.excludedCount], ['delete', result.deleteCount], ['keep', result.keepCount]].filter(([, count]) => count);
+      const counts = [['new', result.newCount], ['replace', result.replaceCount], ['same', result.sameCount || 0], ['excluded', result.excludedCount], ['delete', result.deleteCount], ['keep', result.keepCount]].filter(([, count]) => count);
       body.innerHTML = `
         <div class="deploy-preview-toolbar">
           <label class="form-check form-switch"><input class="form-check-input preview-patch-only" type="checkbox" ${section.dataset.patchOnly === 'false' ? '' : 'checked'}> <span class="form-check-label">Patch files only</span></label>

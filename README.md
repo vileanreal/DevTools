@@ -31,7 +31,8 @@ DevTools is a local-first ASP.NET Core web application that collects practical u
 src/
 ├── DevTools.Web          ASP.NET Core MVC application and composition root
 ├── DevTools.Application  Use cases and service implementations
-└── DevTools.Shared       Reusable contracts, models, enums, and helpers
+├── DevTools.Shared       Reusable contracts, models, enums, and helpers
+└── DevTools.PatchHelper  Single-file .NET Framework 4.8 helper shipped inside Releases patches
 ```
 
 Dependencies point inward: `Web → Application → Shared`.
@@ -154,13 +155,14 @@ The Deployment tool patches web apps and Windows services on the machine running
 1. Create a **system** (optionally with its own **package folder** for uploads and **backup folder**) and add one **module** per deployable folder: the module name must match its top-level folder inside the package. Set the target folder, and optionally the IIS app pool and/or Windows service name, plus default files to exclude.
 2. **Upload** a `.zip` or `.7z` with a required **description** (up to 500 characters). The upload is streamed to disk with progress (never held in memory). Top-level folders are matched to module names; a single wrapper folder (for example `release-2.0/`) is skipped automatically.
 3. **Deploy**: choose the modules, then explicitly choose *Partial update* (replace and add files) or *Whole package* (delete everything except excluded files, then copy) for each one — nothing is preselected. Adjust the exclusions, use **Show files** to preview the files (patch files only by default — new and replaced; switch it off to also see excluded, deleted and kept files), and choose whether to auto-restore on failure. The job then:
-   - backs up into one `mmddyyyy.7z` per deployment (`-2`, `-3`… for later ones that day): only the files that will be replaced for a partial update, the entire folder for a whole package;
+   - compares each package file with the file already in place: for a partial update, files with identical content (same size and same bytes) are skipped — not backed up and not copied — and the preview shows them as **Same**;
+   - backs up into one `mmddyyyy.7z` per deployment (`-2`, `-3`… for later ones that day): only the files that will really change for a partial update, the entire folder for a whole package;
    - stops every selected module's app pools and services;
    - patches every module;
    - starts the app pools and services that were running before.
    Progress, package status and history refresh live, including for jobs started from another browser.
 4. **Rollback** restores a deployment from its backup and removes the files it added. Any deployed package can be rolled back while its backup exists, in any order. If a newer deployment changed the same module, the confirmation warns that its files will be overwritten.
-5. **Packages list**: shows 10 rows per page by default (10/25/50). Click a package to see its details: description, dates, backup, the files in each module, and its history. A deployed package only offers **Rollback**; it can't be deployed again or deleted until it's rolled back. Uploading asks for confirmation when the system still has packages that were never deployed.
+5. **Packages list**: shows 10 rows per page by default (10/25/50). Click a package to see its details: description, dates, backup, the files in each module, and its history. A deployed package only offers **Rollback**; it can't be deployed again or deleted until it's rolled back. Uploading asks for confirmation when the system still has packages that were never deployed, or when a package with the same name and size was uploaded before. Every upload is hashed (SHA-256) while it streams to disk; an identical file is flagged as **Same file as …** on the package and in its upload history.
 6. **History**: each package keeps a detailed, dated history (who, how long, what each module changed, which services were stopped and started, the backup's size, and any failed step) — uploaded (with notes such as a skipped wrapper folder or ignored folders), each deployment started and its outcome (deployed, failed, restored, interrupted), and each rollback — with the modules, backup file and any error.
 
 To try it locally, run `scripts/create-deployment-demo.sh` with DevTools running (add `--populate 24` to also upload 24 test packages, deploy some and roll the last one back, for trying pagination, badges and history; or `--make-packages 24` to only write the test packages to `~/Downloads/SampleApp-test-packages` for uploading by hand). Test packages are kept in that folder with a `descriptions.txt`. It also writes `~/Downloads/SampleApp-Release-3.0-large.zip` (257 files across many folders, for the Sample App modules) to try the folder groups and **Show more** in the package details and Deploy dialogs; `--large-package` writes only that file. It creates mock server folders with version 1 of a web app and a worker in `~/DevToolsDeploymentDemo`, writes a version 2 package to `~/Downloads/SampleApp-Release-2.0.zip`, and registers the **Sample App** system. Running it again resets the mock servers to version 1. For Releases, `scripts/create-deployment-demo.sh --patch-demo` creates the **Sample App Patches** system with mock build folders in `~/DevToolsDeploymentDemo/build`, marks version 1 as the latest version, then simulates a 1.1 build so the module table and **Compile** have changes to show. It also creates **Customer Portal Patches** (about 130 changes across several folders) for trying folder groups and **Show more**. Running it again resets both.
@@ -190,9 +192,24 @@ For environments you can't reach (for example UAT or production at a client), th
 2. **Every module has its own latest version** — the snapshot of what's on UAT/production for that module. Tick modules and use **Set as latest** once their files match. A snapshot stores every file's path, size, last write time and SHA-256 hash (no file contents).
 3. Opening a system checks each module's folder against its latest version and shows ADDED, CHANGED (different hash) and DELETED counts per module; **Check changes** scans again, and **Compare with** measures against an older snapshot instead (for the modules it contains). The pending changes list shows the ticked modules.
 4. **Compile** packages only the ticked modules into a `.zip` or `.7z` with one folder per module — `<module>/ADDED/…`, `<module>/CHANGED/…`, `<module>/DELETED/DELETED-FILES.txt` — and a `PATCH-NOTES.txt` with each module's base version and file list. Tick **Make this the latest version** when the patch goes out now; otherwise use **Set as latest** on the patch later.
-5. Setting a patch or snapshot as latest only moves the version of the modules it contains, so a module you left out keeps its pending changes for a later patch. Patches and snapshots are listed in pages of 10; click one to see its details and its changes grouped by module. Inside each module, changes are grouped by top-level folder (`bin/`, `wwwroot/` …) that can be collapsed; a module shows at most 15 files until you press **Show more**, and a module with more changes starts with its folders collapsed.
+5. **Remarks are required whenever a latest version changes** (compile with *Make this the latest version*, **Set as latest**, or **Undo**), so the reason is always recorded. The module table shows the remarks under each latest version, and **Version history** lists every change — module, previous and new version, how it changed, who and when, and the remarks — with a filter per module and **Latest on** to see which version each module had at a given date and time. **Undo** on a module's newest change moves it back to its previous version.
+6. Setting a patch or snapshot as latest only moves the version of the modules it contains, so a module you left out keeps its pending changes for a later patch. Patches and snapshots are listed in pages of 10; click one to see its details and its changes grouped by module. Inside each module, changes are grouped by top-level folder (`bin/`, `wwwroot/` …) that can be collapsed; a module shows at most 15 files until you press **Show more**, and a module with more changes starts with its folders collapsed.
 
 Unchanged files reuse their previous hash when their size and last write time match, so repeated checks are fast. Patches are saved in the system's patch output folder, or under `deployments/patches/<system>` by default.
+
+#### Patch Helper
+
+Every compiled patch also contains the **Patch Helper** (`PatchHelper.exe`, or the file name set on the system) and a `patch.json` describing each file with its new and previous SHA-256. On the client's server, extract the whole patch to a folder and run the helper as administrator:
+
+1. **Check the patch**: every file is present and matches its checksum.
+2. **Compare with this server**: what will be added, replaced and deleted; files already at the patch's version are skipped, and files that aren't the version the patch was made from (edited by hand or missing) are listed as warnings to accept.
+3. **Back up** the files that will change into `backup-<date>` next to the patch, **stop** the module's IIS app pool and Windows service, **apply** each module, **start** what was running, and **verify** every file by hash.
+
+Each step shows not started, running, done, skipped or failed, with a progress bar, a log (`apply-*.log`) and **Copy report**. If a step fails, choose **Retry**, **Roll back** (restore the backup and remove added files) or leave it. Progress is saved in `apply-state.json`, so a closed or interrupted run can continue or be rolled back the next time the helper opens. Module folders are remembered per system in `%ProgramData%\DevTools Patch Helper`.
+
+- Set the window title, subtitle, support contact and the helper's file name in **Edit system**; set each module's folder, app pool and service *on the client's server* in its module settings.
+- Silent mode: `PatchHelper.exe /silent [/force] [/target:Module=D:\Folder]... [/rollback]` writes the log and returns `0` applied, `1` failed, `2` warnings found (rerun with `/force`), `3` bad patch or arguments, `4` rolled back.
+- The helper targets .NET Framework 4.8 (built into Windows Server 2016 and later) and is a single ~70 KB `.exe` with no DLLs; it is built from `src/DevTools.PatchHelper` together with DevTools. It isn't code-signed, so Windows SmartScreen may ask for confirmation the first time.
 
 ### Hash algorithms
 

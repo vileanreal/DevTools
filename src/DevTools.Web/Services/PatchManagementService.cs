@@ -23,7 +23,9 @@ public interface IPatchManagementService
     Task<PatchChangesDto> GetSnapshotChangesAsync(int snapshotId, CancellationToken cancellationToken);
     Task<PatchChangesDto> GetPackageChangesAsync(int packageId, CancellationToken cancellationToken);
     Task<PatchSnapshotDto> SetCurrentAsLatestAsync(int systemId, SetLatestRequest request, string? actor, CancellationToken cancellationToken);
-    Task<PatchSnapshotDto> SetSnapshotAsLatestAsync(int snapshotId, CancellationToken cancellationToken);
+    Task<PatchSnapshotDto> SetSnapshotAsLatestAsync(int snapshotId, SetSnapshotLatestRequest request, string? actor, CancellationToken cancellationToken);
+    Task<IReadOnlyList<PatchLatestEventDto>> GetLatestHistoryAsync(int systemId, CancellationToken cancellationToken);
+    Task<PatchModuleDto> UndoLatestAsync(int moduleId, UndoLatestRequest request, string? actor, CancellationToken cancellationToken);
     Task DeleteSnapshotAsync(int snapshotId, CancellationToken cancellationToken);
     Task<PatchPackageDto> CompileAsync(int systemId, CompilePatchRequest request, string? actor, CancellationToken cancellationToken);
     Task<IReadOnlyList<PatchPackageDto>> GetPackagesAsync(int systemId, CancellationToken cancellationToken);
@@ -54,13 +56,23 @@ public sealed class PatchManagementService(
     public async Task<IReadOnlyList<PatchSystemDto>> GetSystemsAsync(CancellationToken cancellationToken)
     {
         var systems = await database.PatchSystems.AsNoTracking().Include(item => item.Modules).OrderBy(item => item.Name).ToListAsync(cancellationToken);
-        var versions = await LatestVersionsAsync(systems.SelectMany(system => system.Modules), cancellationToken);
-        return systems.Select(system => ToDto(system, versions)).ToList();
+        var info = await LatestInfoAsync(systems.SelectMany(system => system.Modules).ToList(), cancellationToken);
+        return systems.Select(system => ToDto(system, info)).ToList();
     }
 
     public async Task<PatchSystemDto> SaveSystemAsync(int? id, SavePatchSystemRequest request, CancellationToken cancellationToken)
     {
         var name = Required(request.Name, "System name", 120);
+        var helperTitle = Optional(request.HelperTitle, "Helper title", 120);
+        var helperSubtitle = Optional(request.HelperSubtitle, "Helper subtitle", 200);
+        var supportContact = Optional(request.SupportContact, "Support contact", 300);
+        var helperFileName = Optional(request.HelperFileName, "Helper file name", 100);
+        if (helperFileName is not null)
+        {
+            if (!helperFileName.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) helperFileName += ".exe";
+            if (helperFileName.IndexOfAny([.. Path.GetInvalidFileNameChars(), '/', '\\', ':', '*', '?', '"', '<', '>', '|']) >= 0)
+                throw new ArgumentException("The helper file name can't contain folders or the characters \\ / : * ? \" < > |.");
+        }
         var output = string.IsNullOrWhiteSpace(request.OutputDirectory) ? null : paths.Normalize(request.OutputDirectory, "Patch output folder");
         if (output is not null) paths.EnsureSafeStorageFolder(output, "patch output");
         if (await database.PatchSystems.AnyAsync(item => item.Id != (id ?? 0) && item.Name.ToLower() == name.ToLower(), cancellationToken))
@@ -80,8 +92,12 @@ public sealed class PatchManagementService(
             if (output is not null && entity.Modules.FirstOrDefault(module => paths.Overlaps(module.SourcePath, output)) is { } overlapping)
                 throw new ArgumentException($"The patch output folder overlaps {overlapping.Name}'s folder. Keep patches outside the module folders.");
         }
+        entity.HelperTitle = helperTitle;
+        entity.HelperSubtitle = helperSubtitle;
+        entity.SupportContact = supportContact;
+        entity.HelperFileName = helperFileName;
         await database.SaveChangesAsync(cancellationToken);
-        return ToDto(entity, await LatestVersionsAsync(entity.Modules, cancellationToken));
+        return ToDto(entity, await LatestInfoAsync(entity.Modules, cancellationToken));
     }
 
     public async Task DeleteSystemAsync(int id, CancellationToken cancellationToken)
@@ -102,6 +118,10 @@ public sealed class PatchManagementService(
         paths.EnsureSafeTargetFolder(source);
         var exclusionsError = DeploymentPathMatcher.Validate(request.Exclusions);
         if (exclusionsError is not null) throw new ArgumentException(exclusionsError);
+        // Client-side settings are only text for the Patch Helper: the folder is on the client's server, so it isn't checked here.
+        var clientFolder = Optional(request.ClientFolder, "Folder on the client's server", 2048);
+        var appPool = Optional(request.AppPoolName, "App pool", 200);
+        var service = Optional(request.ServiceName, "Windows service", 200);
         var system = await database.PatchSystems.AsNoTracking().FirstOrDefaultAsync(item => item.Id == systemId, cancellationToken)
             ?? throw new KeyNotFoundException("Patch system not found.");
         if (paths.Overlaps(source, paths.PatchOutputDirectory(system)))
@@ -124,8 +144,11 @@ public sealed class PatchManagementService(
         entity.Name = name;
         entity.SourcePath = source;
         entity.Exclusions = DeploymentPathMatcher.Normalize(request.Exclusions);
+        entity.ClientFolder = clientFolder;
+        entity.AppPoolName = appPool;
+        entity.ServiceName = service;
         await database.SaveChangesAsync(cancellationToken);
-        return ToDto(entity, await LatestVersionsAsync([entity], cancellationToken));
+        return ToDto(entity, await LatestInfoAsync([entity], cancellationToken));
     }
 
     public async Task DeleteModuleAsync(int id, CancellationToken cancellationToken)
@@ -217,6 +240,7 @@ public sealed class PatchManagementService(
     public async Task<PatchSnapshotDto> SetCurrentAsLatestAsync(int systemId, SetLatestRequest request, string? actor, CancellationToken cancellationToken)
     {
         var text = Optional(request.Label, "Label", 500);
+        var remarks = Remarks(request.Remarks);
         return await WithSystemLockAsync(systemId, async () =>
         {
             var system = await LoadSystemAsync(systemId, cancellationToken);
@@ -226,22 +250,73 @@ public sealed class PatchManagementService(
             var snapshot = NewSnapshot(systemId, SourceLatest, text ?? "Set as latest version", actor, current);
             database.PatchSnapshots.Add(snapshot);
             await database.SaveChangesAsync(cancellationToken);
-            await PointModulesAsync(systemId, selected.Select(module => module.Id), snapshot.Id, cancellationToken);
+            await PointModulesAsync(systemId, selected.Select(module => module.Id), snapshot, PatchLatestSources.Current, remarks, actor, null, cancellationToken);
             return await SnapshotDtoAsync(snapshot.Id, cancellationToken);
         });
     }
 
-    /// <summary>Makes a snapshot the latest version of every module it contains (other modules keep theirs).</summary>
-    public async Task<PatchSnapshotDto> SetSnapshotAsLatestAsync(int snapshotId, CancellationToken cancellationToken)
+    /// <summary>
+    /// Makes a snapshot the latest version of every module it contains (other modules keep theirs). When the snapshot
+    /// belongs to a compiled patch, the history records that patch.
+    /// </summary>
+    public async Task<PatchSnapshotDto> SetSnapshotAsLatestAsync(int snapshotId, SetSnapshotLatestRequest request, string? actor, CancellationToken cancellationToken)
     {
+        var remarks = Remarks(request.Remarks);
         var snapshot = await database.PatchSnapshots.AsNoTracking().FirstOrDefaultAsync(item => item.Id == snapshotId, cancellationToken)
             ?? throw new KeyNotFoundException("Snapshot not found.");
         var manifests = PatchCodec.ReadManifest(snapshot.ManifestGz);
         var modules = await database.PatchModules.AsNoTracking().Where(item => item.PatchSystemId == snapshot.PatchSystemId).ToListAsync(cancellationToken);
         var covered = modules.Where(module => Find(manifests, module.Id, module.Name) is not null).Select(module => module.Id).ToList();
         if (covered.Count == 0) throw new InvalidOperationException("None of the modules in this snapshot exist in the system any more.");
-        await PointModulesAsync(snapshot.PatchSystemId, covered, snapshot.Id, cancellationToken);
+        if (modules.Where(module => covered.Contains(module.Id)).All(module => module.LatestSnapshotId == snapshot.Id))
+            throw new InvalidOperationException("This is already the latest version of every module it contains.");
+        var package = await database.PatchPackages.AsNoTracking().Where(item => item.SnapshotId == snapshot.Id).Select(item => new { item.Id, item.FileName }).FirstOrDefaultAsync(cancellationToken);
+        await PointModulesAsync(snapshot.PatchSystemId, covered, snapshot, package is null ? PatchLatestSources.Snapshot : PatchLatestSources.Patch, remarks, actor,
+            package is null ? null : (package.Id, package.FileName), cancellationToken);
         return await SnapshotDtoAsync(snapshot.Id, cancellationToken);
+    }
+
+    // ---------- Latest-version history ----------
+
+    /// <summary>Every change of every module's latest version, newest first. Only each module's newest entry can be undone.</summary>
+    public async Task<IReadOnlyList<PatchLatestEventDto>> GetLatestHistoryAsync(int systemId, CancellationToken cancellationToken)
+    {
+        if (!await database.PatchSystems.AnyAsync(item => item.Id == systemId, cancellationToken)) throw new KeyNotFoundException("Patch system not found.");
+        var events = await database.PatchLatestEvents.AsNoTracking().Where(item => item.PatchSystemId == systemId).ToListAsync(cancellationToken);
+        var pointers = await database.PatchModules.AsNoTracking().Where(item => item.PatchSystemId == systemId)
+            .ToDictionaryAsync(item => item.Id, item => item.LatestSnapshotId, cancellationToken);
+        var newest = events.Where(item => item.PatchModuleId is not null).GroupBy(item => item.PatchModuleId!.Value)
+            .Select(group => group.OrderByDescending(item => item.AtUtc).ThenByDescending(item => item.Id).First().Id).ToHashSet();
+        return events.OrderByDescending(item => item.AtUtc).ThenByDescending(item => item.Id).Select(item => new PatchLatestEventDto(
+            item.Id, item.PatchModuleId, item.ModuleName, item.PreviousSnapshotId, item.PreviousLabel,
+            item.PreviousCreatedAtUtc is null ? null : Utc(item.PreviousCreatedAtUtc.Value), item.SnapshotId, item.SnapshotLabel,
+            item.SnapshotCreatedAtUtc is null ? null : Utc(item.SnapshotCreatedAtUtc.Value), Utc(item.AtUtc), item.CreatedBy, item.Source,
+            item.PatchPackageId, item.PatchFileName, item.Remarks,
+            CanUndo: newest.Contains(item.Id) && item.Source != PatchLatestSources.Initial && item.PatchModuleId is { } moduleId
+                && pointers.TryGetValue(moduleId, out var pointer) && pointer == item.SnapshotId)).ToList();
+    }
+
+    /// <summary>Moves a module back to the version it had before its most recent change, and records why.</summary>
+    public async Task<PatchModuleDto> UndoLatestAsync(int moduleId, UndoLatestRequest request, string? actor, CancellationToken cancellationToken)
+    {
+        var remarks = Remarks(request.Remarks);
+        var module = await database.PatchModules.AsNoTracking().FirstOrDefaultAsync(item => item.Id == moduleId, cancellationToken) ?? throw new KeyNotFoundException("Module not found.");
+        return await WithSystemLockAsync(module.PatchSystemId, async () =>
+        {
+            var last = await database.PatchLatestEvents.AsNoTracking().Where(item => item.PatchModuleId == moduleId)
+                .OrderByDescending(item => item.AtUtc).ThenByDescending(item => item.Id).FirstOrDefaultAsync(cancellationToken);
+            if (last is null || last.Source == PatchLatestSources.Initial)
+                throw new InvalidOperationException($"{module.Name} has no recorded change of its latest version to undo.");
+            if (last.SnapshotId != module.LatestSnapshotId)
+                throw new InvalidOperationException($"{module.Name}'s latest version changed since this entry. Reload the page.");
+            PatchSnapshot? target = null;
+            if (last.PreviousSnapshotId is { } previousId)
+                target = await database.PatchSnapshots.AsNoTracking().FirstOrDefaultAsync(item => item.Id == previousId, cancellationToken)
+                    ?? throw new InvalidOperationException($"The previous version ({last.PreviousLabel ?? "snapshot"}) has been deleted, so {module.Name} can't go back to it.");
+            await PointModulesAsync(module.PatchSystemId, [moduleId], target, PatchLatestSources.Undo, remarks, actor, null, cancellationToken);
+            var saved = await database.PatchModules.AsNoTracking().FirstAsync(item => item.Id == moduleId, cancellationToken);
+            return ToDto(saved, await LatestInfoAsync([saved], cancellationToken));
+        });
     }
 
     public async Task DeleteSnapshotAsync(int snapshotId, CancellationToken cancellationToken)
@@ -264,6 +339,7 @@ public sealed class PatchManagementService(
         var format = (request.Format ?? string.Empty).Trim().TrimStart('.').ToLowerInvariant();
         if (!PatchFormats.IsValid(format)) throw new ArgumentException("Choose .zip or .7z for the patch.");
         var label = Optional(request.Label, "Description", 500);
+        var latestRemarks = request.SetAsLatest ? Remarks(request.LatestRemarks) : null;
         return await WithSystemLockAsync(systemId, async () =>
         {
             var system = await LoadSystemAsync(systemId, cancellationToken);
@@ -282,19 +358,24 @@ public sealed class PatchManagementService(
                 .Select(change => new ArchiveSource(PatchDiff.ArchiveEntry(change.Kind, change.Module, change.Path),
                     PackageArchiveService.ResolveInside(modulesByName[change.Module].SourcePath, change.Path)))
                 .ToList();
-            var textEntries = new Dictionary<string, string>
-            {
-                ["PATCH-NOTES.txt"] = PatchNotes(system, label, actor, changeSet)
-            };
-            foreach (var group in changes.Where(change => change.Kind == PatchChangeKinds.Deleted).GroupBy(change => change.Module, StringComparer.OrdinalIgnoreCase))
-                textEntries[$"{group.Key}/{PatchChangeKinds.Deleted}/DELETED-FILES.txt"] = string.Join("\r\n", group.Select(change => change.Path)) + "\r\n";
-
             var directory = paths.PatchOutputDirectory(system);
             Directory.CreateDirectory(directory);
             var stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture);
             var fileName = $"{SafeFileName(system.Name)}-patch-{stamp}.{format}";
             var storedPath = Path.Combine(directory, fileName);
             for (var counter = 2; File.Exists(storedPath); counter++) storedPath = Path.Combine(directory, $"{SafeFileName(system.Name)}-patch-{stamp}-{counter}.{format}");
+
+            // The Patch Helper (one .exe, renamed per system) and its patch.json go into every patch when the build has it.
+            var helperExe = Path.Combine(AppContext.BaseDirectory, "PatchHelper", "DevTools.PatchHelper.exe");
+            var helperName = File.Exists(helperExe) ? HelperFileName(system) : null;
+            if (helperName is not null) sources.Add(new ArchiveSource(helperName, helperExe));
+            var textEntries = new Dictionary<string, string>
+            {
+                ["PATCH-NOTES.txt"] = PatchNotes(system, label, actor, changeSet, helperName),
+                ["patch.json"] = HelperManifest(system, selected, Path.GetFileNameWithoutExtension(storedPath), label, actor, changeSet)
+            };
+            foreach (var group in changes.Where(change => change.Kind == PatchChangeKinds.Deleted).GroupBy(change => change.Module, StringComparer.OrdinalIgnoreCase))
+                textEntries[$"{group.Key}/{PatchChangeKinds.Deleted}/DELETED-FILES.txt"] = string.Join("\r\n", group.Select(change => change.Path)) + "\r\n";
             await Task.Run(() => archives.CreateArchive(storedPath, format, sources, textEntries, null, cancellationToken), cancellationToken);
 
             // The snapshot records the selected modules' files exactly as compiled, so it can become their latest version.
@@ -321,7 +402,8 @@ public sealed class PatchManagementService(
             };
             database.PatchPackages.Add(package);
             await database.SaveChangesAsync(cancellationToken);
-            if (request.SetAsLatest) await PointModulesAsync(systemId, selected.Select(module => module.Id), snapshot.Id, cancellationToken);
+            if (request.SetAsLatest)
+                await PointModulesAsync(systemId, selected.Select(module => module.Id), snapshot, PatchLatestSources.Compile, latestRemarks!, actor, (package.Id, package.FileName), cancellationToken);
             return ToDto(package, chosen?.CreatedAtUtc, request.SetAsLatest, null);
         });
     }
@@ -445,15 +527,55 @@ public sealed class PatchManagementService(
             ?? list.FirstOrDefault(item => item.ModuleName.Equals(name, StringComparison.OrdinalIgnoreCase));
     }
 
-    /// <summary>Moves the given modules' latest version to a snapshot and keeps the snapshot "is latest" flags in step.</summary>
-    private async Task PointModulesAsync(int systemId, IEnumerable<int> moduleIds, int snapshotId, CancellationToken cancellationToken)
+    /// <summary>
+    /// Moves the given modules' latest version to a snapshot, records one history entry per module that actually moves
+    /// (with the remarks saying why), and keeps the snapshot "is latest" flags in step.
+    /// </summary>
+    private async Task PointModulesAsync(int systemId, IEnumerable<int> moduleIds, PatchSnapshot? snapshot, string source, string remarks, string? actor,
+        (int Id, string FileName)? patch, CancellationToken cancellationToken)
     {
         var ids = moduleIds.ToList();
-        await database.PatchModules.Where(item => item.PatchSystemId == systemId && ids.Contains(item.Id))
-            .ExecuteUpdateAsync(setters => setters.SetProperty(item => item.LatestSnapshotId, snapshotId), cancellationToken);
-        await database.PatchSnapshots.Where(item => item.Id == snapshotId)
-            .ExecuteUpdateAsync(setters => setters.SetProperty(item => item.MarkedLatestAtUtc, DateTime.UtcNow), cancellationToken);
+        var modules = await database.PatchModules.Where(item => item.PatchSystemId == systemId && ids.Contains(item.Id)).ToListAsync(cancellationToken);
+        var previousIds = modules.Where(module => module.LatestSnapshotId is not null).Select(module => module.LatestSnapshotId!.Value).Distinct().ToList();
+        var previous = await database.PatchSnapshots.AsNoTracking().Where(item => previousIds.Contains(item.Id))
+            .Select(item => new { item.Id, item.Label, item.CreatedAtUtc }).ToDictionaryAsync(item => item.Id, cancellationToken);
+        var now = DateTime.UtcNow;
+        foreach (var module in modules.Where(module => module.LatestSnapshotId != snapshot?.Id))
+        {
+            var before = module.LatestSnapshotId is { } previousId && previous.TryGetValue(previousId, out var found) ? found : null;
+            database.PatchLatestEvents.Add(new PatchLatestEvent
+            {
+                PatchSystemId = systemId,
+                PatchModuleId = module.Id,
+                ModuleName = module.Name,
+                PreviousSnapshotId = module.LatestSnapshotId,
+                PreviousLabel = before?.Label,
+                PreviousCreatedAtUtc = before?.CreatedAtUtc,
+                SnapshotId = snapshot?.Id,
+                SnapshotLabel = snapshot?.Label,
+                SnapshotCreatedAtUtc = snapshot?.CreatedAtUtc,
+                AtUtc = now,
+                CreatedBy = actor,
+                Source = source,
+                PatchPackageId = patch?.Id,
+                PatchFileName = patch?.FileName,
+                Remarks = remarks
+            });
+            module.LatestSnapshotId = snapshot?.Id;
+        }
+        await database.SaveChangesAsync(cancellationToken);
+        if (snapshot is not null)
+            await database.PatchSnapshots.Where(item => item.Id == snapshot.Id)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(item => item.MarkedLatestAtUtc, now), cancellationToken);
         await SyncLatestFlagsAsync(systemId, cancellationToken);
+    }
+
+    /// <summary>Why a module's latest version changes. Required, so the history always explains itself.</summary>
+    private static string Remarks(string? value)
+    {
+        var text = Required(value, "Remarks", 1000);
+        if (text.Length < 3) throw new ArgumentException("Remarks must say why this is the latest version (at least 3 characters).");
+        return text;
     }
 
     private async Task SyncLatestFlagsAsync(int systemId, CancellationToken cancellationToken)
@@ -466,13 +588,20 @@ public sealed class PatchManagementService(
             .ExecuteUpdateAsync(setters => setters.SetProperty(item => item.IsLatest, true), cancellationToken);
     }
 
-    private async Task<Dictionary<int, (DateTime CreatedAtUtc, string? Label)>> LatestVersionsAsync(IEnumerable<PatchModule> modules, CancellationToken cancellationToken)
+    /// <summary>Each module's latest version (snapshot date and label) and the newest history entry explaining it.</summary>
+    private sealed record LatestInfo(Dictionary<int, (DateTime CreatedAtUtc, string? Label)> Versions, Dictionary<int, PatchLatestEvent> LastEvents);
+
+    private async Task<LatestInfo> LatestInfoAsync(IReadOnlyCollection<PatchModule> modules, CancellationToken cancellationToken)
     {
         var ids = modules.Where(module => module.LatestSnapshotId is not null).Select(module => module.LatestSnapshotId!.Value).Distinct().ToList();
-        if (ids.Count == 0) return [];
-        return await database.PatchSnapshots.AsNoTracking().Where(item => ids.Contains(item.Id))
+        var versions = ids.Count == 0 ? [] : await database.PatchSnapshots.AsNoTracking().Where(item => ids.Contains(item.Id))
             .Select(item => new { item.Id, item.CreatedAtUtc, item.Label })
             .ToDictionaryAsync(item => item.Id, item => (item.CreatedAtUtc, item.Label), cancellationToken);
+        var moduleIds = modules.Select(module => (int?)module.Id).ToList();
+        var events = moduleIds.Count == 0 ? [] : await database.PatchLatestEvents.AsNoTracking().Where(item => moduleIds.Contains(item.PatchModuleId)).ToListAsync(cancellationToken);
+        var lastEvents = events.GroupBy(item => item.PatchModuleId!.Value)
+            .ToDictionary(group => group.Key, group => group.OrderByDescending(item => item.AtUtc).ThenByDescending(item => item.Id).First());
+        return new LatestInfo(versions, lastEvents);
     }
 
     private async Task<PatchSnapshotDto> SnapshotDtoAsync(int snapshotId, CancellationToken cancellationToken)
@@ -505,7 +634,21 @@ public sealed class PatchManagementService(
         Modules = PatchCodec.WriteNames(manifests.Select(module => module.ModuleName))
     };
 
-    private static string PatchNotes(PatchSystem system, string? label, string? actor, PatchChangeSet changeSet)
+    private static readonly System.Text.Json.JsonSerializerOptions HelperJson = new(System.Text.Json.JsonSerializerDefaults.Web) { WriteIndented = true };
+
+    /// <summary>patch.json: each module's files with their new and previous SHA-256, and the helper's title and services.</summary>
+    private static string HelperManifest(PatchSystem system, IReadOnlyList<PatchModule> modules, string patchName, string? label, string? actor, PatchChangeSet changeSet)
+    {
+        var withChanges = changeSet.Modules.Where(HasChanges).Select(item => item.Module).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var manifest = new PatchHelperManifest(1, system.Name, HelperTitle(system), system.HelperSubtitle, system.SupportContact, patchName, label,
+            DateTime.Now.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture), actor,
+            modules.Where(module => withChanges.Contains(module.Name)).Select(module => new PatchHelperModule(module.Name, module.ClientFolder, module.AppPoolName, module.ServiceName,
+                changeSet.Files.Where(file => file.Module.Equals(module.Name, StringComparison.OrdinalIgnoreCase))
+                    .Select(file => new PatchHelperFile(file.Path.Replace('\\', '/'), file.Kind, file.Size, file.Sha256?.ToLowerInvariant(), file.PreviousSha256?.ToLowerInvariant())).ToList())).ToList());
+        return System.Text.Json.JsonSerializer.Serialize(manifest, HelperJson);
+    }
+
+    private static string PatchNotes(PatchSystem system, string? label, string? actor, PatchChangeSet changeSet, string? helperName)
     {
         var text = new StringBuilder();
         text.AppendLine($"Patch for {system.Name}");
@@ -513,7 +656,14 @@ public sealed class PatchManagementService(
         text.AppendLine($"Created: {DateTime.Now:yyyy-MM-dd HH:mm:ss}{(string.IsNullOrWhiteSpace(actor) ? "" : $" by {actor}")}");
         text.AppendLine($"Modules: {string.Join(", ", changeSet.Modules.Where(HasChanges).Select(item => item.Module))}");
         text.AppendLine();
-        text.AppendLine("How to apply (for each module folder in this patch):");
+        if (helperName is not null)
+        {
+            text.AppendLine($"Easiest: extract the whole patch to a folder, then run {helperName} as administrator.");
+            text.AppendLine("It checks the files, backs up, stops and starts the app pools and services, applies and verifies, and can roll back.");
+            text.AppendLine($"Silent mode: {helperName} /silent [/force] [/target:Module=D:\\Folder]  (writes apply-*.log; exit code 0 = applied)");
+            text.AppendLine();
+        }
+        text.AppendLine("How to apply by hand (for each module folder in this patch):");
         text.AppendLine("  <module>/ADDED/...    copy these new files into the module folder.");
         text.AppendLine("  <module>/CHANGED/...  copy these over the existing files in the module folder.");
         text.AppendLine("  <module>/DELETED/DELETED-FILES.txt  delete the listed files from the module folder.");
@@ -539,15 +689,23 @@ public sealed class PatchManagementService(
         finally { gate.Release(); }
     }
 
-    private PatchSystemDto ToDto(PatchSystem entity, Dictionary<int, (DateTime CreatedAtUtc, string? Label)> versions) =>
+    private PatchSystemDto ToDto(PatchSystem entity, LatestInfo info) =>
         new(entity.Id, entity.Name, entity.OutputDirectory, paths.PatchOutputDirectory(entity),
-            entity.Modules.OrderBy(module => module.Name, StringComparer.OrdinalIgnoreCase).Select(module => ToDto(module, versions)).ToList());
+            entity.Modules.OrderBy(module => module.Name, StringComparer.OrdinalIgnoreCase).Select(module => ToDto(module, info)).ToList(),
+            entity.HelperTitle, entity.HelperSubtitle, entity.SupportContact, entity.HelperFileName, HelperTitle(entity), HelperFileName(entity));
 
-    private static PatchModuleDto ToDto(PatchModule entity, Dictionary<int, (DateTime CreatedAtUtc, string? Label)> versions)
+    public static string HelperTitle(PatchSystem system) => string.IsNullOrWhiteSpace(system.HelperTitle) ? $"{system.Name} Patch Helper" : system.HelperTitle!;
+    public static string HelperFileName(PatchSystem system) => string.IsNullOrWhiteSpace(system.HelperFileName) ? "PatchHelper.exe" : system.HelperFileName!;
+
+    private static PatchModuleDto ToDto(PatchModule entity, LatestInfo info)
     {
-        var version = entity.LatestSnapshotId is { } id && versions.TryGetValue(id, out var found) ? found : ((DateTime, string?)?)null;
+        var version = entity.LatestSnapshotId is { } id && info.Versions.TryGetValue(id, out var found) ? found : ((DateTime, string?)?)null;
+        var last = info.LastEvents.GetValueOrDefault(entity.Id);
+        // Only show remarks that explain the current version (not an older entry left over after manual changes).
+        if (last is not null && last.SnapshotId != entity.LatestSnapshotId) last = null;
         return new(entity.Id, entity.PatchSystemId, entity.Name, entity.SourcePath, entity.Exclusions,
-            version is null ? null : entity.LatestSnapshotId, version is null ? null : Utc(version.Value.Item1), version?.Item2);
+            version is null ? null : entity.LatestSnapshotId, version is null ? null : Utc(version.Value.Item1), version?.Item2,
+            last?.Remarks, last is null ? null : Utc(last.AtUtc), last?.CreatedBy, entity.ClientFolder, entity.AppPoolName, entity.ServiceName);
     }
 
     private static PatchPackageDto ToDto(PatchPackage entity, DateTime? baseCreatedAtUtc, bool snapshotIsLatest, string? snapshotModules)

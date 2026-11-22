@@ -19,6 +19,7 @@ public sealed class DevToolsDbContext(DbContextOptions<DevToolsDbContext> option
     public DbSet<PatchModule> PatchModules => Set<PatchModule>();
     public DbSet<PatchSnapshot> PatchSnapshots => Set<PatchSnapshot>();
     public DbSet<PatchPackage> PatchPackages => Set<PatchPackage>();
+    public DbSet<PatchLatestEvent> PatchLatestEvents => Set<PatchLatestEvent>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -103,12 +104,28 @@ public sealed class DevToolsDbContext(DbContextOptions<DevToolsDbContext> option
             entity.HasMany(item => item.Modules).WithOne(item => item.PatchSystem).HasForeignKey(item => item.PatchSystemId).OnDelete(DeleteBehavior.Cascade);
             entity.HasMany(item => item.Snapshots).WithOne(item => item.PatchSystem).HasForeignKey(item => item.PatchSystemId).OnDelete(DeleteBehavior.Cascade);
             entity.HasMany(item => item.Packages).WithOne(item => item.PatchSystem).HasForeignKey(item => item.PatchSystemId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasMany(item => item.LatestEvents).WithOne(item => item.PatchSystem).HasForeignKey(item => item.PatchSystemId).OnDelete(DeleteBehavior.Cascade);
+            entity.Property(item => item.HelperTitle).HasMaxLength(120);
+            entity.Property(item => item.HelperSubtitle).HasMaxLength(200);
+            entity.Property(item => item.SupportContact).HasMaxLength(300);
+            entity.Property(item => item.HelperFileName).HasMaxLength(100);
+        });
+        modelBuilder.Entity<PatchLatestEvent>(entity =>
+        {
+            entity.Property(item => item.ModuleName).HasMaxLength(120).IsRequired();
+            entity.Property(item => item.Source).HasMaxLength(20).IsRequired();
+            entity.Property(item => item.Remarks).HasMaxLength(1000).IsRequired();
+            entity.Property(item => item.CreatedBy).HasMaxLength(120);
+            entity.HasIndex(item => new { item.PatchSystemId, item.AtUtc });
         });
         modelBuilder.Entity<PatchModule>(entity =>
         {
             entity.Property(item => item.Name).HasMaxLength(120).IsRequired();
             entity.Property(item => item.SourcePath).HasMaxLength(2048).IsRequired();
             entity.Property(item => item.Exclusions).HasMaxLength(4000);
+            entity.Property(item => item.ClientFolder).HasMaxLength(2048);
+            entity.Property(item => item.AppPoolName).HasMaxLength(200);
+            entity.Property(item => item.ServiceName).HasMaxLength(200);
             entity.HasIndex(item => new { item.PatchSystemId, item.Name }).IsUnique();
         });
         modelBuilder.Entity<PatchSnapshot>(entity =>

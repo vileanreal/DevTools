@@ -72,11 +72,18 @@ public sealed record DeploymentPackageDto(
     bool CanRollback,
     string? RollbackBlockedReason,
     string? RollbackWarning,
-    IReadOnlyList<DeploymentEventDto> Events);
+    IReadOnlyList<DeploymentEventDto> Events,
+    // Earlier uploads in the same system with exactly the same file content (same SHA-256).
+    IReadOnlyList<DeploymentSameFile>? SameFileAs = null);
+
+public sealed record DeploymentSameFile(int Id, string FileName, string? Description, DateTimeOffset UploadedAt, string Status);
 
 public sealed record DeployModuleOption(int ModuleId, string? Mode, string? Exclusions);
 
-/// <summary>Preview of what deploying one module will do. Action: new, replace, excluded, delete or keep.</summary>
+/// <summary>
+/// Preview of what deploying one module will do. Action: new, replace, same (identical to the file already there, so a
+/// partial update skips it), excluded, delete or keep.
+/// </summary>
 public sealed record DeploymentFilePreviewRequest(int ModuleId, string? Mode, string? Exclusions);
 public sealed record DeploymentFileChange(string Path, string Action, long Size);
 public sealed record DeploymentFilePreview(
@@ -88,7 +95,8 @@ public sealed record DeploymentFilePreview(
     int DeleteCount,
     int KeepCount,
     bool Truncated,
-    IReadOnlyList<DeploymentFileChange> Files);
+    IReadOnlyList<DeploymentFileChange> Files,
+    int SameCount = 0);
 public sealed record DeployPackageRequest(IReadOnlyList<DeployModuleOption>? Modules, bool AutoRestore = true);
 
 public sealed record DeploymentStepDto(string Key, string Label, string Status, string? Detail);
@@ -123,4 +131,6 @@ public sealed record DeploymentManifestModule(
     string? AppPoolName,
     string? ServiceName,
     IReadOnlyList<string> BackedUpFiles,
-    IReadOnlyList<string> AddedFiles);
+    IReadOnlyList<string> AddedFiles,
+    // Partial updates only: package files identical to the file already in place; they are not backed up or copied.
+    IReadOnlyList<string>? UnchangedFiles = null);

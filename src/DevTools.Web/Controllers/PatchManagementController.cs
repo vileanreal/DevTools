@@ -60,8 +60,17 @@ public sealed class PatchManagementController(IPatchManagementService service, I
         Run(() => service.SetCurrentAsLatestAsync(systemId, request, Actor, cancellationToken));
 
     [HttpPost("snapshots/{id:int}/latest")]
-    public Task<ActionResult<ApiResult<PatchSnapshotDto>>> SetSnapshotAsLatest(int id, CancellationToken cancellationToken) =>
-        Run(() => service.SetSnapshotAsLatestAsync(id, cancellationToken));
+    public Task<ActionResult<ApiResult<PatchSnapshotDto>>> SetSnapshotAsLatest(int id, SetSnapshotLatestRequest request, CancellationToken cancellationToken) =>
+        Run(() => service.SetSnapshotAsLatestAsync(id, request, Actor, cancellationToken));
+
+    /// <summary>Every change of the modules' latest versions, newest first, with the remarks explaining each.</summary>
+    [HttpGet("systems/{systemId:int}/latest-history")]
+    public Task<ActionResult<ApiResult<IReadOnlyList<PatchLatestEventDto>>>> LatestHistory(int systemId, CancellationToken cancellationToken) =>
+        Run(() => service.GetLatestHistoryAsync(systemId, cancellationToken));
+
+    [HttpPost("modules/{id:int}/latest/undo")]
+    public Task<ActionResult<ApiResult<PatchModuleDto>>> UndoLatest(int id, UndoLatestRequest request, CancellationToken cancellationToken) =>
+        Run(() => service.UndoLatestAsync(id, request, Actor, cancellationToken));
 
     [HttpDelete("snapshots/{id:int}")]
     public Task<ActionResult<ApiResult<bool>>> DeleteSnapshot(int id, CancellationToken cancellationToken) =>

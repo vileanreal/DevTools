@@ -8,12 +8,12 @@ namespace DevTools.Web.Data;
 
 public static class DatabaseInitializer
 {
-    private const int CurrentSchemaVersion = 7;
+    private const int CurrentSchemaVersion = 8;
     private static readonly string[] ApplicationTables =
     [
         "LogSystems", "LogSources", "SqlDocSources", "SqlDocDiagrams", "ServiceSystems", "ManagedServices",
         "DeploymentSystems", "DeploymentModules", "DeploymentPackages", "DeploymentEvents",
-        "PatchSystems", "PatchModules", "PatchSnapshots", "PatchPackages"
+        "PatchSystems", "PatchModules", "PatchSnapshots", "PatchPackages", "PatchLatestEvents"
     ];
 
     public static void Initialize(DevToolsDbContext database)
@@ -35,6 +35,8 @@ public static class DatabaseInitializer
         if (upgradeRequired && existingDatabaseLength > 0 && ApplicationTables.Any(table => TableExists(connection, table)))
             CreatePreUpgradeBackup(connection);
 
+        // Read before the schema is created: a new history table gets one "initial" entry per module's current version.
+        var historyTableIsNew = !TableExists(connection, "PatchLatestEvents");
         using var transaction = connection.BeginTransaction();
         try
         {
@@ -42,6 +44,7 @@ public static class DatabaseInitializer
             AddMissingLogSourceColumns(connection, transaction);
             AddMissingDeploymentColumns(connection, transaction);
             AddMissingPatchColumns(connection, transaction);
+            AddVersion8Columns(connection, transaction, historyTableIsNew);
             CreateCurrentIndexes(connection, transaction);
             SetSchemaVersion(connection, transaction, CurrentSchemaVersion);
             transaction.Commit();
@@ -165,7 +168,11 @@ public static class DatabaseInitializer
             CREATE TABLE IF NOT EXISTS PatchSystems (
                 Id INTEGER NOT NULL CONSTRAINT PK_PatchSystems PRIMARY KEY AUTOINCREMENT,
                 Name TEXT NOT NULL,
-                OutputDirectory TEXT NULL
+                OutputDirectory TEXT NULL,
+                HelperTitle TEXT NULL,
+                HelperSubtitle TEXT NULL,
+                SupportContact TEXT NULL,
+                HelperFileName TEXT NULL
             )
             """, transaction);
         Execute(connection, """
@@ -176,6 +183,9 @@ public static class DatabaseInitializer
                 SourcePath TEXT NOT NULL,
                 Exclusions TEXT NULL,
                 LatestSnapshotId INTEGER NULL,
+                ClientFolder TEXT NULL,
+                AppPoolName TEXT NULL,
+                ServiceName TEXT NULL,
                 CONSTRAINT FK_PatchModules_PatchSystems_PatchSystemId FOREIGN KEY (PatchSystemId) REFERENCES PatchSystems (Id) ON DELETE CASCADE
             )
             """, transaction);
@@ -215,6 +225,27 @@ public static class DatabaseInitializer
                 Modules TEXT NULL,
                 ChangesGz BLOB NULL,
                 CONSTRAINT FK_PatchPackages_PatchSystems_PatchSystemId FOREIGN KEY (PatchSystemId) REFERENCES PatchSystems (Id) ON DELETE CASCADE
+            )
+            """, transaction);
+        Execute(connection, """
+            CREATE TABLE IF NOT EXISTS PatchLatestEvents (
+                Id INTEGER NOT NULL CONSTRAINT PK_PatchLatestEvents PRIMARY KEY AUTOINCREMENT,
+                PatchSystemId INTEGER NOT NULL,
+                PatchModuleId INTEGER NULL,
+                ModuleName TEXT NOT NULL,
+                PreviousSnapshotId INTEGER NULL,
+                PreviousLabel TEXT NULL,
+                PreviousCreatedAtUtc TEXT NULL,
+                SnapshotId INTEGER NULL,
+                SnapshotLabel TEXT NULL,
+                SnapshotCreatedAtUtc TEXT NULL,
+                AtUtc TEXT NOT NULL,
+                CreatedBy TEXT NULL,
+                Source TEXT NOT NULL,
+                PatchPackageId INTEGER NULL,
+                PatchFileName TEXT NULL,
+                Remarks TEXT NOT NULL,
+                CONSTRAINT FK_PatchLatestEvents_PatchSystems_PatchSystemId FOREIGN KEY (PatchSystemId) REFERENCES PatchSystems (Id) ON DELETE CASCADE
             )
             """, transaction);
         Execute(connection, """
@@ -293,6 +324,29 @@ public static class DatabaseInitializer
                     Execute(connection, "UPDATE PatchModules SET LatestSnapshotId = $value WHERE Id = $id", transaction, ("$value", snapshot.Id), ("$id", module.Id));
     }
 
+    /// <summary>
+    /// v8: package hashes (duplicate upload warning), Patch Helper settings per system and module, and the latest-version
+    /// history. When the history table is new, each module's current latest version gets one "initial" entry so the
+    /// history starts from what is true now. Only columns and rows are added.
+    /// </summary>
+    private static void AddVersion8Columns(DbConnection connection, DbTransaction transaction, bool historyTableIsNew)
+    {
+        if (!Columns(connection, transaction, "DeploymentPackages").Contains("Sha256")) Execute(connection, "ALTER TABLE DeploymentPackages ADD COLUMN Sha256 TEXT NULL", transaction);
+        var systemColumns = Columns(connection, transaction, "PatchSystems");
+        foreach (var column in new[] { "HelperTitle", "HelperSubtitle", "SupportContact", "HelperFileName" })
+            if (!systemColumns.Contains(column)) Execute(connection, $"ALTER TABLE PatchSystems ADD COLUMN {column} TEXT NULL", transaction);
+        var moduleColumns = Columns(connection, transaction, "PatchModules");
+        foreach (var column in new[] { "ClientFolder", "AppPoolName", "ServiceName" })
+            if (!moduleColumns.Contains(column)) Execute(connection, $"ALTER TABLE PatchModules ADD COLUMN {column} TEXT NULL", transaction);
+        if (!historyTableIsNew) return;
+        Execute(connection, """
+            INSERT INTO PatchLatestEvents (PatchSystemId, PatchModuleId, ModuleName, SnapshotId, SnapshotLabel, SnapshotCreatedAtUtc, AtUtc, CreatedBy, Source, Remarks)
+            SELECT m.PatchSystemId, m.Id, m.Name, s.Id, s.Label, s.CreatedAtUtc, COALESCE(s.MarkedLatestAtUtc, s.CreatedAtUtc), s.CreatedBy, 'initial',
+                   'Recorded when version history tracking started'
+            FROM PatchModules m JOIN PatchSnapshots s ON s.Id = m.LatestSnapshotId
+            """, transaction);
+    }
+
     private static void CreateCurrentIndexes(DbConnection connection, DbTransaction transaction)
     {
         Execute(connection, "CREATE UNIQUE INDEX IF NOT EXISTS IX_LogSystems_Name ON LogSystems (Name)", transaction);
@@ -309,6 +363,8 @@ public static class DatabaseInitializer
         Execute(connection, "CREATE UNIQUE INDEX IF NOT EXISTS IX_PatchModules_PatchSystemId_Name ON PatchModules (PatchSystemId, Name)", transaction);
         Execute(connection, "CREATE INDEX IF NOT EXISTS IX_PatchSnapshots_PatchSystemId_CreatedAtUtc ON PatchSnapshots (PatchSystemId, CreatedAtUtc)", transaction);
         Execute(connection, "CREATE INDEX IF NOT EXISTS IX_PatchModules_LatestSnapshotId ON PatchModules (LatestSnapshotId)", transaction);
+        Execute(connection, "CREATE INDEX IF NOT EXISTS IX_PatchLatestEvents_PatchSystemId_AtUtc ON PatchLatestEvents (PatchSystemId, AtUtc)", transaction);
+        Execute(connection, "CREATE INDEX IF NOT EXISTS IX_DeploymentPackages_DeploymentSystemId_Sha256 ON DeploymentPackages (DeploymentSystemId, Sha256)", transaction);
         Execute(connection, "CREATE INDEX IF NOT EXISTS IX_PatchPackages_PatchSystemId_CreatedAtUtc ON PatchPackages (PatchSystemId, CreatedAtUtc)", transaction);
     }
 
@@ -322,7 +378,10 @@ public static class DatabaseInitializer
             || !Columns(connection, null, "DeploymentPackages").Contains("Description")
             || !Columns(connection, null, "PatchModules").Contains("LatestSnapshotId")
             || !Columns(connection, null, "PatchSnapshots").Contains("Modules")
-            || !Columns(connection, null, "PatchPackages").Contains("ChangesGz");
+            || !Columns(connection, null, "PatchPackages").Contains("ChangesGz")
+            || !Columns(connection, null, "DeploymentPackages").Contains("Sha256")
+            || !Columns(connection, null, "PatchSystems").Contains("HelperTitle")
+            || !Columns(connection, null, "PatchModules").Contains("ClientFolder");
     }
 
     private static int GetSchemaVersion(DbConnection connection)

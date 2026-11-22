@@ -65,13 +65,13 @@ public sealed class DeploymentExecutor(IPackageArchiveService archives, ISystemS
     public async Task<DeploymentManifest> DeployAsync(DeploymentPlan plan, IDeploymentReporter reporter, CancellationToken cancellationToken)
     {
         // 1. Work out what each module will change, then back it all up into one archive.
-        reporter.Step(DeploymentSteps.Backup, "running", "Finding files that will be replaced");
+        reporter.Step(DeploymentSteps.Backup, "running", "Comparing package files with the files in place");
         var modules = plan.Modules.Select(module => BuildManifestModule(module)).ToList();
         var manifest = new DeploymentManifest(plan.PackageId, plan.PackageFileName, DateTimeOffset.UtcNow, modules);
         var backupFiles = modules.SelectMany(module => module.BackedUpFiles.Select(file =>
             new ArchiveSource($"{module.ModuleName}/{file}", PackageArchiveService.ResolveInside(module.TargetPath, file)))).ToList();
         foreach (var module in modules)
-            reporter.Log("info", $"{module.ModuleName}: {module.Mode} update, {module.BackedUpFiles.Count:N0} file(s) to back up, {module.AddedFiles.Count:N0} new file(s).");
+            reporter.Log("info", $"{module.ModuleName}: {module.Mode} update, {module.BackedUpFiles.Count:N0} file(s) to back up, {module.AddedFiles.Count:N0} new file(s){(module.UnchangedFiles is { Count: > 0 } same ? $", {same.Count:N0} identical file(s) skipped" : "")}.");
         var backedUp = 0;
         await Task.Run(() => archives.CreateSevenZip(plan.BackupPath, backupFiles,
             new Dictionary<string, string> { [DeploymentSteps.ManifestEntry] = JsonSerializer.Serialize(manifest, DeploymentSteps.Json) },
@@ -93,10 +93,13 @@ public sealed class DeploymentExecutor(IPackageArchiveService archives, ISystemS
             foreach (var module in plan.Modules)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                var (copied, deleted, skipped) = await Task.Run(() => PatchModule(module, reporter, cancellationToken), cancellationToken);
-                reporter.Log("info", $"{module.ModuleName}: {copied:N0} file(s) copied to {module.TargetPath}.");
-                var added = manifest.Modules.First(item => item.ModuleId == module.ModuleId).AddedFiles.Count;
+                var moduleManifest = manifest.Modules.First(item => item.ModuleId == module.ModuleId);
+                var unchanged = new HashSet<string>(moduleManifest.UnchangedFiles ?? [], PathComparer);
+                var (copied, deleted, skipped) = await Task.Run(() => PatchModule(module, unchanged, reporter, cancellationToken), cancellationToken);
+                reporter.Log("info", $"{module.ModuleName}: {copied:N0} file(s) copied to {module.TargetPath}{(unchanged.Count > 0 ? $", {unchanged.Count:N0} identical file(s) left as they are" : "")}.");
+                var added = moduleManifest.AddedFiles.Count;
                 var parts = new List<string> { $"{copied:N0} copied ({added:N0} new, {Math.Max(0, copied - added):N0} replaced)" };
+                if (unchanged.Count > 0) parts.Add($"{unchanged.Count:N0} unchanged skipped");
                 if (module.Mode == DeploymentModes.Full) parts.Add($"{deleted:N0} deleted");
                 if (skipped > 0) parts.Add($"{skipped:N0} skipped by exclusions");
                 reporter.Summary($"{module.ModuleName} — {(module.Mode == DeploymentModes.Full ? "whole package" : "partial update")}: {string.Join(", ", parts)}");
@@ -162,14 +165,24 @@ public sealed class DeploymentExecutor(IPackageArchiveService archives, ISystemS
         var targetExists = Directory.Exists(module.TargetPath);
         var existing = targetExists ? RelativeFiles(module.TargetPath).ToHashSet(PathComparer) : new HashSet<string>(PathComparer);
         var added = packageFiles.Where(file => !existing.Contains(file)).OrderBy(file => file, PathComparer).ToList();
-        // Whole package: back up everything in the module folder. Partial: only the files that will be overwritten.
-        var backedUp = module.Mode == DeploymentModes.Full
-            ? existing.OrderBy(file => file, PathComparer).ToList()
-            : packageFiles.Where(existing.Contains).OrderBy(file => file, PathComparer).ToList();
-        return new DeploymentManifestModule(module.ModuleId, module.ModuleName, module.TargetPath, module.Mode, module.Exclusions, module.AppPoolName, module.ServiceName, backedUp, added);
+        if (module.Mode == DeploymentModes.Full)
+            // Whole package: the folder is cleared and refilled, so everything in it is backed up.
+            return new DeploymentManifestModule(module.ModuleId, module.ModuleName, module.TargetPath, module.Mode, module.Exclusions, module.AppPoolName, module.ServiceName,
+                existing.OrderBy(file => file, PathComparer).ToList(), added);
+
+        // Partial: files identical to the one already in place are skipped (not backed up, not copied); only files
+        // that really change are backed up and overwritten.
+        var unchanged = new List<string>();
+        var backedUp = new List<string>();
+        foreach (var file in packageFiles.Where(existing.Contains).OrderBy(file => file, PathComparer))
+        {
+            if (ContentComparer.FilesEqual(PackageArchiveService.ResolveInside(module.StagingPath, file), PackageArchiveService.ResolveInside(module.TargetPath, file))) unchanged.Add(file);
+            else backedUp.Add(file);
+        }
+        return new DeploymentManifestModule(module.ModuleId, module.ModuleName, module.TargetPath, module.Mode, module.Exclusions, module.AppPoolName, module.ServiceName, backedUp, added, unchanged);
     }
 
-    private static (int Copied, int Deleted, int Skipped) PatchModule(DeploymentModulePlan module, IDeploymentReporter reporter, CancellationToken cancellationToken)
+    private static (int Copied, int Deleted, int Skipped) PatchModule(DeploymentModulePlan module, IReadOnlySet<string> unchanged, IDeploymentReporter reporter, CancellationToken cancellationToken)
     {
         var exclusions = DeploymentPathMatcher.Parse(module.Exclusions);
         Directory.CreateDirectory(module.TargetPath);
@@ -185,6 +198,7 @@ public sealed class DeploymentExecutor(IPackageArchiveService archives, ISystemS
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (exclusions.IsExcluded(file)) { skipped++; continue; }
+            if (unchanged.Contains(file)) continue;
             var source = PackageArchiveService.ResolveInside(module.StagingPath, file);
             var destination = PackageArchiveService.ResolveInside(module.TargetPath, file);
             Directory.CreateDirectory(Path.GetDirectoryName(destination)!);

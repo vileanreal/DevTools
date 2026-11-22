@@ -146,7 +146,7 @@ print(next((str(s["id"]) for s in json.load(sys.stdin)["data"] if s["name"]==sys
   fi
 
   echo "Marking version 1 as the latest version (what UAT/production has)..."
-  curl -fsS -o /dev/null -X POST "$papi/systems/$system_id/latest" -H 'Content-Type: application/json' -d '{"label":"UAT baseline v1.0"}'
+  curl -fsS -o /dev/null -X POST "$papi/systems/$system_id/latest" -H 'Content-Type: application/json' -d '{"label":"UAT baseline v1.0","remarks":"Demo: version 1 is what UAT/production has"}'
 
   sleep 1.2   # so changed files get a newer timestamp
   echo "Simulating build 1.1..."
@@ -198,7 +198,7 @@ print(next((str(s["id"]) for s in json.load(sys.stdin)["data"] if s["name"]==sys
   else
     echo "'$big_system' already exists (id $big_id); resetting its build to version 1."
   fi
-  curl -fsS -o /dev/null -X POST "$papi/systems/$big_id/latest" -H 'Content-Type: application/json' -d '{"label":"Portal 3.0 (production)"}'
+  curl -fsS -o /dev/null -X POST "$papi/systems/$big_id/latest" -H 'Content-Type: application/json' -d '{"label":"Portal 3.0 (production)","remarks":"Demo: Portal 3.0 is live in production"}'
 
   sleep 1.2
   echo "Simulating build 3.1..."

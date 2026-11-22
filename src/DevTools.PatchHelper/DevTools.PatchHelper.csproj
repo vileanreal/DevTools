@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The Patch Helper ships inside each compiled patch. It targets .NET Framework 4.8 (built into every supported Windows
+    Server) and uses no NuGet packages at run time, so the build output is one self-contained .exe with no DLLs beside it.
+    Microsoft.NETFramework.ReferenceAssemblies is build-time only (it lets the SDK compile for net48 on any OS).
+  -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <AssemblyName>DevTools.PatchHelper</AssemblyName>
+    <RootNamespace>DevTools.PatchHelper</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <AutoGenerateBindingRedirects>false</AutoGenerateBindingRedirects>
+    <GenerateSupportedRuntime>false</GenerateSupportedRuntime>
+    <Product>DevTools Patch Helper</Product>
+    <AssemblyTitle>DevTools Patch Helper</AssemblyTitle>
+    <Description>Applies a DevTools patch: checks, backs up, stops services, applies, starts services and verifies.</Description>
+    <Version>1.0.0</Version>
+    <!-- No .exe.config next to the exe: .NET Framework 4.8 runs it without one. -->
+    <GenerateAppConfig>false</GenerateAppConfig>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+    <Reference Include="System.Windows.Forms" />
+    <Reference Include="System.Drawing" />
+    <Reference Include="System.ServiceProcess" />
+    <Reference Include="System.Runtime.Serialization" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The Patch Helper itself targets .NET Framework 4.8 (Windows only). Its engine and patch.json contracts have no
+    Windows dependency, so the same source files are compiled into this .NET 9 test project and tested on any OS.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" Version="6.0.2" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+    <Compile Include="..\..\src\DevTools.PatchHelper\PatchEngine.cs" Link="Linked\PatchEngine.cs" />
+    <Compile Include="..\..\src\DevTools.PatchHelper\PatchManifest.cs" Link="Linked\PatchManifest.cs" />
+  </ItemGroup>
+
+</Project>

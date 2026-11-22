@@ -132,10 +132,38 @@ public sealed class DeploymentService(
         var packages = await database.DeploymentPackages.AsNoTracking().Include(item => item.Events).Where(item => item.DeploymentSystemId == systemId).ToListAsync(cancellationToken);
         var rollback = RollbackAvailability(packages);
         var busy = jobs.IsBusy(systemId);
+        // Each package lists the earlier uploads with the same content.
+        IReadOnlyList<DeploymentSameFile> SameAs(DeploymentPackage item) => item.Sha256 is null ? [] : packages
+            .Where(other => other.Id != item.Id && other.UploadedAtUtc < item.UploadedAtUtc && other.Sha256 == item.Sha256)
+            .OrderByDescending(other => other.UploadedAtUtc).Select(ToSameFile).ToList();
         return packages.OrderByDescending(item => item.UploadedAtUtc)
-            .Select(item => ToDto(item, rollback.TryGetValue(item.Id, out var state) && state.CanRollback && !busy, rollback.GetValueOrDefault(item.Id)?.Reason, rollback.GetValueOrDefault(item.Id)?.Warning, busy))
+            .Select(item => ToDto(item, rollback.TryGetValue(item.Id, out var state) && state.CanRollback && !busy, rollback.GetValueOrDefault(item.Id)?.Reason, rollback.GetValueOrDefault(item.Id)?.Warning, busy, SameAs(item)))
             .ToList();
     }
+
+    /// <summary>
+    /// Earlier uploads of the same file in a system. Packages uploaded before hashes were recorded are hashed now, but
+    /// only when their size matches, and the hash is saved so each old file is read at most once.
+    /// </summary>
+    private async Task<IReadOnlyList<DeploymentSameFile>> FindSameFileAsync(int systemId, int? exceptId, string? sha256, long size, CancellationToken cancellationToken)
+    {
+        if (sha256 is null) return [];
+        var legacy = await database.DeploymentPackages.Where(item => item.DeploymentSystemId == systemId && item.Sha256 == null && item.SizeBytes == size).ToListAsync(cancellationToken);
+        foreach (var item in legacy.Where(item => File.Exists(item.StoredPath)))
+            item.Sha256 = await Task.Run(() =>
+            {
+                using var stream = new FileStream(item.StoredPath, FileMode.Open, FileAccess.Read, FileShare.Read, 1024 * 256);
+                return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(stream));
+            }, cancellationToken);
+        if (legacy.Count > 0) await database.SaveChangesAsync(cancellationToken);
+        var matches = await database.DeploymentPackages.AsNoTracking()
+            .Where(item => item.DeploymentSystemId == systemId && item.Sha256 == sha256 && item.Id != (exceptId ?? 0))
+            .OrderByDescending(item => item.UploadedAtUtc).ToListAsync(cancellationToken);
+        return matches.Select(ToSameFile).ToList();
+    }
+
+    private static DeploymentSameFile ToSameFile(DeploymentPackage item) =>
+        new(item.Id, item.FileName, item.Description, new DateTimeOffset(DateTime.SpecifyKind(item.UploadedAtUtc, DateTimeKind.Utc)), item.Status);
 
     public const int MaxDescriptionLength = 500;
 
@@ -156,6 +184,8 @@ public sealed class DeploymentService(
         var storedPath = Path.Combine(directory, $"{Guid.NewGuid():N}{Path.GetExtension(safeName).ToLowerInvariant()}");
         var partial = storedPath + ".partial";
         long size;
+        // The SHA-256 is computed while streaming, so spotting a re-upload of the same file costs no extra read.
+        using var hash = System.Security.Cryptography.IncrementalHash.CreateHash(System.Security.Cryptography.HashAlgorithmName.SHA256);
         try
         {
             // Stream straight to disk in chunks; the upload is never held in memory.
@@ -170,6 +200,7 @@ public sealed class DeploymentService(
                     size += read;
                     if (size > limit) throw new ArgumentException($"The package is larger than the {options.Value.MaxUploadMegabytes:N0} MB limit.");
                     await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
+                    hash.AppendData(buffer, 0, read);
                 }
             }
             if (size == 0) throw new ArgumentException("The uploaded file is empty.");
@@ -192,6 +223,7 @@ public sealed class DeploymentService(
                 Description = text,
                 StoredPath = storedPath,
                 SizeBytes = size,
+                Sha256 = Convert.ToHexString(hash.GetHashAndReset()),
                 UploadedAtUtc = DateTime.UtcNow,
                 Status = DeploymentPackageStatuses.Uploaded,
                 AnalysisJson = JsonSerializer.Serialize(analysis, Json)
@@ -200,10 +232,12 @@ public sealed class DeploymentService(
             if (!string.IsNullOrWhiteSpace(actor)) uploadLines.Add($"By: {actor}");
             uploadLines.Add($"File: {safeName} ({FormatBytes(size)}, {FormatBytes(analysis.TotalUncompressedBytes)} unpacked)");
             uploadLines.AddRange(analysis.Modules.Select(module => $"{module.ModuleName}: {module.FileCount:N0} file(s), {FormatBytes(module.TotalBytes)}"));
+            var sameFile = await FindSameFileAsync(systemId, null, entity.Sha256, size, cancellationToken);
+            uploadLines.AddRange(sameFile.Select(item => $"Same file as {item.FileName}, uploaded {item.UploadedAt.ToLocalTime():yyyy-MM-dd HH:mm}"));
             entity.Events.Add(new DeploymentEvent { Kind = DeploymentEventKinds.Uploaded, AtUtc = entity.UploadedAtUtc, Detail = string.Join('\n', uploadLines) });
             database.DeploymentPackages.Add(entity);
             await database.SaveChangesAsync(cancellationToken);
-            return ToDto(entity, canRollback: false, rollbackBlockedReason: null, rollbackWarning: null, busy: jobs.IsBusy(systemId));
+            return ToDto(entity, canRollback: false, rollbackBlockedReason: null, rollbackWarning: null, busy: jobs.IsBusy(systemId), sameFile);
         }
         catch
         {
@@ -283,9 +317,27 @@ public sealed class DeploymentService(
                 foreach (var file in new DirectoryInfo(module.TargetPath).EnumerateFiles("*", new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true, AttributesToSkip = FileAttributes.ReparsePoint }))
                     targetFiles[Path.GetRelativePath(module.TargetPath, file.FullName).Replace('\\', '/')] = file.Length;
 
+            // A partial update skips package files identical to the file already in place, so the preview compares the
+            // content of every same-size candidate (read from the archive in one pass) and marks those as "same".
+            var same = new HashSet<string>(comparer);
+            if (request.Mode != DeploymentModes.Full)
+            {
+                var candidates = packageFiles.Where(item => !exclusions.IsExcluded(item.Key) && targetFiles.TryGetValue(item.Key, out var targetSize) && targetSize == item.Value)
+                    .Select(item => item.Key).ToHashSet(comparer);
+                if (candidates.Count > 0)
+                    archives.ReadEntries(package.StoredPath,
+                        entry => DeploymentPackageLayout.Locate(entry, analysis.WrapperFolder) is { } value && value.Folder.Equals(folder, StringComparison.OrdinalIgnoreCase) && candidates.Contains(value.RelativePath),
+                        (entry, stream) =>
+                        {
+                            var relative = DeploymentPackageLayout.Locate(entry, analysis.WrapperFolder)!.Value.RelativePath;
+                            using var target = new FileStream(PackageArchiveService.ResolveInside(module.TargetPath, relative), FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 128 * 1024);
+                            if (ContentComparer.StreamsEqual(stream, target)) same.Add(relative);
+                        }, cancellationToken);
+            }
+
             var changes = new List<DeploymentFileChange>();
             foreach (var (path, size) in packageFiles)
-                changes.Add(new DeploymentFileChange(path, exclusions.IsExcluded(path) ? "excluded" : targetFiles.ContainsKey(path) ? "replace" : "new", size));
+                changes.Add(new DeploymentFileChange(path, exclusions.IsExcluded(path) ? "excluded" : same.Contains(path) ? "same" : targetFiles.ContainsKey(path) ? "replace" : "new", size));
             if (request.Mode == DeploymentModes.Full)
                 // Existing files missing from the package: deleted, unless excluded (then kept as they are).
                 foreach (var (path, size) in targetFiles.Where(item => !packageFiles.ContainsKey(item.Key)))
@@ -293,7 +345,7 @@ public sealed class DeploymentService(
             int Count(string action) => changes.Count(change => change.Action == action);
             var ordered = changes.OrderBy(change => change.Path, StringComparer.OrdinalIgnoreCase).ToList();
             return new DeploymentFilePreview(module.Id, request.Mode, Count("new"), Count("replace"), Count("excluded"), Count("delete"), Count("keep"),
-                ordered.Count > MaxPreviewFiles, ordered.Take(MaxPreviewFiles).ToList());
+                ordered.Count > MaxPreviewFiles, ordered.Take(MaxPreviewFiles).ToList(), Count("same"));
         }, cancellationToken);
     }
 
@@ -351,7 +403,7 @@ public sealed class DeploymentService(
     private static DeploymentModuleDto ToDto(DeploymentModule entity) =>
         new(entity.Id, entity.DeploymentSystemId, entity.Name, entity.TargetPath, entity.AppPoolName, entity.ServiceName, entity.DefaultExclusions);
 
-    private static DeploymentPackageDto ToDto(DeploymentPackage entity, bool canRollback, string? rollbackBlockedReason, string? rollbackWarning, bool busy)
+    private static DeploymentPackageDto ToDto(DeploymentPackage entity, bool canRollback, string? rollbackBlockedReason, string? rollbackWarning, bool busy, IReadOnlyList<DeploymentSameFile>? sameFileAs = null)
     {
         var analysis = JsonSerializer.Deserialize<DeploymentPackageAnalysis>(entity.AnalysisJson, Json) ?? new DeploymentPackageAnalysis(null, [], [], 0, 0);
         // A deployed package is live: its only action is Rollback.
@@ -367,7 +419,7 @@ public sealed class DeploymentService(
             entity.BackupPath is null ? null : Path.GetFileName(entity.BackupPath),
             entity.DeployedAtUtc is null ? null : new DateTimeOffset(DateTime.SpecifyKind(entity.DeployedAtUtc.Value, DateTimeKind.Utc)),
             entity.RolledBackAtUtc is null ? null : new DateTimeOffset(DateTime.SpecifyKind(entity.RolledBackAtUtc.Value, DateTimeKind.Utc)),
-            entity.Error, canDeploy, canRollback, rollbackBlockedReason, rollbackWarning, events);
+            entity.Error, canDeploy, canRollback, rollbackBlockedReason, rollbackWarning, events, sameFileAs ?? []);
     }
 
     private static string FormatBytes(long value)

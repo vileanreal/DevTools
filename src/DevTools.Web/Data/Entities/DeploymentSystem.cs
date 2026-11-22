@@ -30,6 +30,8 @@ public sealed class DeploymentPackage
     public string? Description { get; set; }
     public required string StoredPath { get; set; }
     public long SizeBytes { get; set; }
+    /// <summary>SHA-256 of the uploaded file (hex), used to warn about uploading the same file twice. Null for old uploads until checked.</summary>
+    public string? Sha256 { get; set; }
     public DateTime UploadedAtUtc { get; set; }
     public required string Status { get; set; }
     public required string AnalysisJson { get; set; }

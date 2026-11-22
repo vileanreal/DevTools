@@ -62,6 +62,19 @@
             <div id="patch-snapshot-list"><div class="empty-state">No snapshots yet.</div></div>
             <div id="patch-snapshot-pager" class="deploy-pager d-none"></div>
         </section>
+
+        <section class="deploy-card">
+            <div class="patch-toolbar">
+                <div class="patch-toolbar-title"><h3>Version history</h3><span>Every change of a module's latest version, and why</span></div>
+                <div class="patch-toolbar-actions">
+                    <label class="patch-compare"><span>Module</span><select id="patch-history-module" class="form-select form-select-sm"><option value="">All modules</option></select></label>
+                    <label class="patch-compare"><span>Latest on</span><input id="patch-history-date" class="form-control form-control-sm" type="datetime-local" aria-label="Show the latest version of each module at this date and time"></label>
+                </div>
+            </div>
+            <div id="patch-history-asof" class="patch-asof d-none"></div>
+            <div id="patch-history-list"><div class="empty-state compact">No changes recorded yet.</div></div>
+            <div id="patch-history-pager" class="deploy-pager d-none"></div>
+        </section>
     </div>
 </section>
 </div>
@@ -72,6 +85,15 @@
         <div class="modal-body service-form-fields">
             <div><label class="field-label" for="patch-system-name-input">System name</label><input id="patch-system-name-input" class="form-control" maxlength="120" required placeholder="e.g. Sample App UAT"></div>
             <div><label class="field-label" for="patch-system-output-input">Patch output folder <span class="text-muted fw-normal">(optional)</span></label><input id="patch-system-output-input" class="form-control" maxlength="2048" placeholder="e.g. C:\Patches\MyApp"><div class="form-text">Compiled patches are saved here. Leave empty to use DevTools' deployments folder. It must be outside the module folders.</div></div>
+            <fieldset class="patch-fieldset">
+                <legend>Patch Helper <span class="text-muted fw-normal">(the app inside each patch that applies it on the client's server)</span></legend>
+                <div class="patch-field-grid">
+                    <div><label class="field-label" for="patch-system-helper-title">Window title</label><input id="patch-system-helper-title" class="form-control" maxlength="120" placeholder="e.g. Sample App Update Assistant"><div class="form-text">Empty: “&lt;system name&gt; Patch Helper”.</div></div>
+                    <div><label class="field-label" for="patch-system-helper-file">File name in the patch</label><input id="patch-system-helper-file" class="form-control" maxlength="100" placeholder="PatchHelper.exe"></div>
+                    <div class="deploy-span-2"><label class="field-label" for="patch-system-helper-subtitle">Subtitle</label><input id="patch-system-helper-subtitle" class="form-control" maxlength="200" placeholder="e.g. Prepared by the Sample App team"></div>
+                    <div class="deploy-span-2"><label class="field-label" for="patch-system-support">Support contact</label><input id="patch-system-support" class="form-control" maxlength="300" placeholder="e.g. If something fails, send the log to support@example.com"><div class="form-text">Shown by the helper when a step fails.</div></div>
+                </div>
+            </fieldset>
         </div>
         <div class="modal-footer"><button type="button" class="btn btn-ghost" data-bs-dismiss="modal">Cancel</button><button id="patch-system-submit" class="btn btn-primary" type="submit">Add system</button></div>
     </form></div>
@@ -91,6 +113,15 @@
         <div class="modal-body deploy-module-form">
             <div><label class="field-label" for="patch-module-name">Module name (folder in the patch)</label><input id="patch-module-name" class="form-control" maxlength="120" required placeholder="e.g. WebApi"></div>
             <div><label class="field-label" for="patch-module-source">Module folder</label><input id="patch-module-source" class="form-control" maxlength="2048" required placeholder="e.g. C:\Build\MyApp\WebApi"></div>
+            <fieldset class="patch-fieldset deploy-span-2">
+                <legend>On the client's server <span class="text-muted fw-normal">(optional, used by the Patch Helper)</span></legend>
+                <div class="patch-field-grid three">
+                    <div><label class="field-label" for="patch-module-client-folder">Module folder</label><input id="patch-module-client-folder" class="form-control" maxlength="2048" placeholder="e.g. D:\Sites\WebApi"></div>
+                    <div><label class="field-label" for="patch-module-app-pool">IIS app pool</label><input id="patch-module-app-pool" class="form-control" maxlength="200" placeholder="e.g. WebApiPool"></div>
+                    <div><label class="field-label" for="patch-module-service">Windows service</label><input id="patch-module-service" class="form-control" maxlength="200" placeholder="e.g. SampleApp.Worker"></div>
+                </div>
+                <div class="form-text">The helper suggests this folder and stops the app pool and service before applying, then starts the ones that were running.</div>
+            </fieldset>
             <div class="deploy-span-2"><label class="field-label" for="patch-module-exclusions">Files to ignore <span class="text-muted fw-normal">(optional)</span></label><textarea id="patch-module-exclusions" class="form-control code-input" rows="4" maxlength="4000" spellcheck="false" placeholder="web.config&#10;appsettings*.json&#10;logs/"></textarea><div class="form-text">Ignored files are never tracked or included in a patch. One pattern per line: a name matches at any depth, <code>*</code> and <code>?</code> are wildcards, a trailing <code>/</code> means a folder, and <code>**</code> spans folders.</div></div>
         </div>
         <div class="modal-footer"><button type="button" class="btn btn-ghost" data-bs-dismiss="modal">Cancel</button><button id="patch-module-submit" class="btn btn-primary" type="submit">Add module</button></div>
@@ -114,6 +145,7 @@
             </div>
             <div><label class="field-label" for="patch-compile-label">Description <span class="text-muted fw-normal">(optional)</span></label><input id="patch-compile-label" class="form-control" maxlength="500" placeholder="e.g. Redmine #1234 — invoice export fix"></div>
             <label class="patch-option"><input id="patch-compile-latest" class="form-check-input" type="checkbox"><span><strong>Make this the latest version</strong><small>Tick when this patch goes to UAT/production now. The selected modules' next changes are then measured from it; other modules keep their own version. You can also do this later from the patch.</small></span></label>
+            <div id="patch-compile-remarks-wrap" class="d-none"><label class="field-label" for="patch-compile-remarks">Remarks <span class="text-danger">*</span></label><textarea id="patch-compile-remarks" class="form-control" rows="2" maxlength="1000" placeholder="Why is this the latest version? e.g. Delivered to client UAT, ticket #1234"></textarea></div>
             <div class="patch-compile-structure"><strong>Inside the patch</strong><code>&lt;module&gt;/ADDED/…</code><code>&lt;module&gt;/CHANGED/…</code><code>&lt;module&gt;/DELETED/DELETED-FILES.txt</code><code>PATCH-NOTES.txt</code></div>
         </div>
         <div class="modal-footer"><button type="button" class="btn btn-ghost" data-bs-dismiss="modal">Cancel</button><button id="patch-compile-submit" class="btn btn-primary" type="submit">Compile</button></div>
@@ -126,6 +158,7 @@
         <div class="modal-body service-form-fields">
             <p class="mb-0">Takes a snapshot of the selected modules' files now and marks it as their version on UAT/production. Their later changes are measured from it; other modules keep their own version.</p>
             <div><div class="patch-field-head"><span class="field-label">Modules</span></div><div id="patch-latest-modules" class="patch-check-list"></div></div>
+            <div><label class="field-label" for="patch-latest-remarks">Remarks <span class="text-danger">*</span></label><textarea id="patch-latest-remarks" class="form-control" rows="2" maxlength="1000" required minlength="3" placeholder="Why is this the latest version? e.g. Client confirmed production matches build 2.4"></textarea></div>
             <div><label class="field-label" for="patch-latest-label">Label <span class="text-muted fw-normal">(optional)</span></label><input id="patch-latest-label" class="form-control" maxlength="500" placeholder="e.g. Production release 2.4"></div>
         </div>
         <div class="modal-footer"><button type="button" class="btn btn-ghost" data-bs-dismiss="modal">Cancel</button><button id="patch-latest-submit" class="btn btn-primary" type="submit">Set as latest</button></div>
@@ -142,4 +175,26 @@
         </div>
         <div class="modal-footer"><div id="patch-details-actions" class="deploy-row-actions me-auto"></div><button type="button" class="btn btn-sm btn-ghost" data-bs-dismiss="modal">Close</button></div>
     </div></div>
+</div>
+
+<div class="modal fade" id="patchSnapshotLatestModal" tabindex="-1" aria-labelledby="patch-snapshot-latest-title" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered"><form id="patch-snapshot-latest-form" class="modal-content">
+        <div class="modal-header"><div><h5 class="modal-title" id="patch-snapshot-latest-title">Set as latest version</h5><p id="patch-snapshot-latest-subtitle" class="modal-subtitle"></p></div><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
+        <div class="modal-body service-form-fields">
+            <p id="patch-snapshot-latest-text" class="mb-0"></p>
+            <div><label class="field-label" for="patch-snapshot-latest-remarks">Remarks <span class="text-danger">*</span></label><textarea id="patch-snapshot-latest-remarks" class="form-control" rows="2" maxlength="1000" required minlength="3" placeholder="Why is this the latest version? e.g. Client installed this patch on production 21/11"></textarea></div>
+        </div>
+        <div class="modal-footer"><button type="button" class="btn btn-ghost" data-bs-dismiss="modal">Cancel</button><button id="patch-snapshot-latest-submit" class="btn btn-primary" type="submit">Set as latest</button></div>
+    </form></div>
+</div>
+
+<div class="modal fade" id="patchUndoModal" tabindex="-1" aria-labelledby="patch-undo-title" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered"><form id="patch-undo-form" class="modal-content">
+        <div class="modal-header"><h5 class="modal-title" id="patch-undo-title">Undo latest version change</h5><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
+        <div class="modal-body service-form-fields">
+            <p id="patch-undo-text" class="mb-0"></p>
+            <div><label class="field-label" for="patch-undo-remarks">Remarks <span class="text-danger">*</span></label><textarea id="patch-undo-remarks" class="form-control" rows="2" maxlength="1000" required minlength="3" placeholder="Why undo? e.g. Wrong patch marked; the client hasn't installed it yet"></textarea></div>
+        </div>
+        <div class="modal-footer"><button type="button" class="btn btn-ghost" data-bs-dismiss="modal">Cancel</button><button id="patch-undo-submit" class="btn btn-primary" type="submit">Undo</button></div>
+    </form></div>
 </div>
