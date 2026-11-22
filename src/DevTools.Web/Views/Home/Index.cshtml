@@ -5,7 +5,7 @@
     var tools = ToolCatalog.Enabled(ToolConfiguration.Value);
 }
 
-<div class="app-shell no-sidebar">
+<div class="app-shell no-sidebar @(Model == "home" ? "" : "tool-page")">
     <main class="workspace">
         @if (Model == "home")
         {

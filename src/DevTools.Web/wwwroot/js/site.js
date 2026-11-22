@@ -36,7 +36,18 @@
   };
   const toastElement = byId('app-toast');
   const toast = toastElement ? bootstrap.Toast.getOrCreateInstance(toastElement, { delay: 2500 }) : null;
-  const notify = (message, error = false) => { if (!toastElement) return; toastElement.querySelector('.toast-body').textContent = message; toastElement.classList.toggle('text-bg-danger', error); toast.show(); };
+  // Success messages are green, errors red, each with an icon so the kind is clear at a glance.
+  const notify = (message, error = false) => {
+    if (!toastElement) return;
+    const body = toastElement.querySelector('.toast-body');
+    body.innerHTML = `<span class="app-toast-icon" aria-hidden="true">${error ? '!' : '✓'}</span><span class="app-toast-text"></span>`;
+    body.querySelector('.app-toast-text').textContent = message;
+    toastElement.classList.toggle('app-toast-error', error);
+    toastElement.classList.toggle('app-toast-success', !error);
+    toastElement.setAttribute('role', error ? 'alert' : 'status');
+    toast._config.delay = error ? 6000 : 3000;
+    toast.show();
+  };
   const jsonRequest = async (url, method = 'GET', body = null) => {
     const options = { method, headers: {} };
     if (body !== null) { options.headers['Content-Type'] = 'application/json'; options.body = JSON.stringify(body); }
