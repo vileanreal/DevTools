@@ -17,5 +17,6 @@ public static class DependencyInjection
         .AddSingleton<ISystemServiceRuntime, LocalSystemServiceRuntime>()
         .AddSingleton<IPackageArchiveService, PackageArchiveService>()
         .AddSingleton<IDeploymentExecutor, DeploymentExecutor>()
+        .AddSingleton<IDeploymentVersionChecker, DeploymentVersionChecker>()
         .AddSingleton<IPatchScanner, PatchScanner>();
 }

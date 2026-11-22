@@ -19,6 +19,11 @@
 #   scripts/create-deployment-demo.sh --large-package  # only write SampleApp-Release-3.0-large.zip (~270 files in many
 #                                                       # folders, for the Sample App system) to ~/Downloads, to try the
 #                                                       # folder groups and "Show more" in the package and deploy dialogs
+#   scripts/create-deployment-demo.sh --version-tests  # packages for the Deployment version check: builds a small .NET
+#                                                       # SampleApp.Api.dll at several versions (needs the .NET SDK), puts
+#                                                       # 1.0.0 on the mock WebApi server, writes test packages to
+#                                                       # ~/Downloads/SampleApp-version-tests and turns the check on for
+#                                                       # the Sample App system (WebApi main file bin/SampleApp.Api.dll)
 #   scripts/create-deployment-demo.sh --make-packages [N]
 #                                                       # only write N test packages (default 24) to
 #                                                       # ~/Downloads/SampleApp-test-packages for uploading by hand;
@@ -34,13 +39,15 @@ POPULATE=0
 MAKE_ONLY=0
 PATCH_DEMO=0
 LARGE_ONLY=0
+VERSION_TESTS=0
 case "${1:-}" in
+  --version-tests) VERSION_TESTS=1 ;;
   --large-package) LARGE_ONLY=1 ;;
   --populate) POPULATE="${2:-24}" ;;
   --make-packages) POPULATE="${2:-24}"; MAKE_ONLY=1 ;;
   --patch-demo) PATCH_DEMO=1 ;;
   "") ;;
-  *) echo "Usage: $0 [--populate N | --make-packages N | --patch-demo | --large-package]" >&2; exit 1 ;;
+  *) echo "Usage: $0 [--populate N | --make-packages N | --patch-demo | --large-package | --version-tests]" >&2; exit 1 ;;
 esac
 [[ "$POPULATE" =~ ^[0-9]+$ ]] || { echo "Usage: $0 [--populate N | --make-packages N]" >&2; exit 1; }
 
@@ -105,6 +112,90 @@ build_large_package() {
   echo "Large package: $DOWNLOADS/$LARGE_PACKAGE ($(find "$root" -type f | wc -l | tr -d ' ') files)"
 }
 if [[ "$LARGE_ONLY" -eq 1 ]]; then build_large_package; exit 0; fi
+
+# ---------- Packages for the Deployment version check ----------
+if [[ "$VERSION_TESTS" -eq 1 ]]; then
+  # Prefer a user-local SDK (~/.dotnet), which is where the .NET 9 SDK is often installed on macOS.
+  if [[ -x "$HOME/.dotnet/dotnet" ]]; then dotnet_cmd="$HOME/.dotnet/dotnet"; else dotnet_cmd="$(command -v dotnet || true)"; fi
+  [[ -x "$dotnet_cmd" ]] || { echo "The .NET SDK is needed to build the test dll (dotnet was not found)." >&2; exit 1; }
+  out="$DOWNLOADS/SampleApp-version-tests"
+  lib="$work/versionlib"
+  mkdir -p "$lib" "$out"
+  cat > "$lib/SampleApp.Api.csproj" <<'XML'
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><TargetFramework>net9.0</TargetFramework><AssemblyName>SampleApp.Api</AssemblyName><GenerateDocumentationFile>false</GenerateDocumentationFile></PropertyGroup>
+</Project>
+XML
+  echo 'namespace SampleApp.Api { public static class Info { public const string Name = "SampleApp.Api"; } }' > "$lib/Info.cs"
+  build_dll() { # $1 = version, prints the dll path
+    if ! "$dotnet_cmd" build "$lib/SampleApp.Api.csproj" -c Release -nologo -v q -p:Version="$1" -p:FileVersion="$1.0" -p:AssemblyVersion="$1.0" -o "$work/dll-$1" > "$work/build-$1.log" 2>&1; then
+      echo "Building the test dll failed (needs the .NET 9 SDK):" >&2; tail -20 "$work/build-$1.log" >&2; exit 1
+    fi
+    echo "$work/dll-$1/SampleApp.Api.dll"
+  }
+  version_package() { # $1 = zip name, $2 = dll to include (or "none" / "text")
+    local root="$work/vt/$1"
+    rm -rf "$root"; mkdir -p "$root/WebApi/bin"
+    case "$2" in
+      none) ;;
+      text) echo "not a real dll" > "$root/WebApi/bin/SampleApp.Api.dll" ;;
+      *) cp "$2" "$root/WebApi/bin/SampleApp.Api.dll" ;;
+    esac
+    write "$root/WebApi/wwwroot/js/app.js" "console.log('$1');"
+    rm -f "$out/$1.zip"
+    (cd "$root" && zip -qr -X "$out/$1.zip" WebApi)
+  }
+
+  echo "Building SampleApp.Api.dll 0.9.0, 1.0.0 and 1.1.0..."
+  v090=$(build_dll 0.9.0) || exit 1; v100=$(build_dll 1.0.0) || exit 1; v110=$(build_dll 1.1.0) || exit 1
+  echo "Putting version 1.0.0 on the mock WebApi server ($servers/WebApi/bin)..."
+  mkdir -p "$servers/WebApi/bin"
+  cp "$v100" "$servers/WebApi/bin/SampleApp.Api.dll"
+
+  version_package "1-same-version-1.0.0" "$v100"
+  version_package "2-newer-version-1.1.0" "$v110"
+  version_package "3-older-version-0.9.0" "$v090"
+  version_package "4-main-file-missing" none
+  version_package "5-no-readable-version" text
+  cat > "$out/README.txt" <<'TXT'
+Version check test packages for the Sample App system (module WebApi, main file bin/SampleApp.Api.dll).
+The mock WebApi server has SampleApp.Api.dll version 1.0.0.
+
+Upload each package, open Deploy and choose an update type. With "Require a new version on every deployment" on:
+  1-same-version-1.0.0.zip    blocked: same version as the server
+  2-newer-version-1.1.0.zip   allowed: 1.0.0 -> 1.1.0
+  3-older-version-0.9.0.zip   blocked: older than the server (use Rollback to go back)
+  4-main-file-missing.zip     blocked: the package doesn't contain the main file
+  5-no-readable-version.zip   blocked: the main file has no readable version
+With the setting off, nothing is blocked; the versions are only shown.
+After deploying 2-newer-version-1.1.0.zip, the server has 1.1.0, so the newer package becomes "same" (blocked) if uploaded again.
+Run the script with --version-tests again to put 1.0.0 back on the server.
+TXT
+
+  if [[ "${SKIP_REGISTER:-0}" != "1" ]] && curl -fsS -o /dev/null "$DEVTOOLS_URL/api/deployment/systems"; then
+    echo "Turning the version check on for '$SYSTEM_NAME' (WebApi main file bin/SampleApp.Api.dll)..."
+    curl -fsS "$DEVTOOLS_URL/api/deployment/systems" | python3 -c '
+import json, sys, urllib.request
+url, name = sys.argv[1], sys.argv[2]
+system = next((item for item in json.load(sys.stdin)["data"] if item["name"] == name), None)
+if system is None:
+    sys.exit(f"System {name!r} not found; run the script without options first.")
+def put(path, body):
+    request = urllib.request.Request(url + path, data=json.dumps(body).encode(), method="PUT", headers={"Content-Type": "application/json"})
+    urllib.request.urlopen(request).read()
+sid = system["id"]
+put(f"/api/deployment/systems/{sid}", {"name": system["name"], "backupDirectory": system["backupDirectory"], "packageDirectory": system["packageDirectory"], "requireVersionChange": True})
+module = next(item for item in system["modules"] if item["name"] == "WebApi")
+mid = module["id"]
+put(f"/api/deployment/systems/{sid}/modules/{mid}", {"name": module["name"], "targetPath": module["targetPath"], "appPoolName": module["appPoolName"],
+    "serviceName": module["serviceName"], "defaultExclusions": module["defaultExclusions"], "versionFile": "bin/SampleApp.Api.dll"})
+' "$DEVTOOLS_URL" "$SYSTEM_NAME"
+  else
+    echo "DevTools isn't reachable (or SKIP_REGISTER=1): in Sample App, set WebApi's main file to bin/SampleApp.Api.dll and turn on Require a new version."
+  fi
+  echo "Test packages: $out (see README.txt)"
+  exit 0
+fi
 
 # ---------- Mock system for Releases ----------
 if [[ "$PATCH_DEMO" -eq 1 ]]; then

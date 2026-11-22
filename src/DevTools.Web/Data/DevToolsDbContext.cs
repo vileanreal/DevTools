@@ -81,6 +81,7 @@ public sealed class DevToolsDbContext(DbContextOptions<DevToolsDbContext> option
             entity.Property(item => item.AppPoolName).HasMaxLength(260);
             entity.Property(item => item.ServiceName).HasMaxLength(260);
             entity.Property(item => item.DefaultExclusions).HasMaxLength(4000);
+            entity.Property(item => item.VersionFile).HasMaxLength(500);
             entity.HasIndex(item => new { item.DeploymentSystemId, item.Name }).IsUnique();
         });
         modelBuilder.Entity<DeploymentPackage>(entity =>

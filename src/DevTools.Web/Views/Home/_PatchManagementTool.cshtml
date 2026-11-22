@@ -70,8 +70,8 @@
     <div class="modal-dialog modal-dialog-centered"><form id="patch-system-form" class="modal-content">
         <div class="modal-header"><div><h5 class="modal-title" id="patch-system-modal-title">Add system</h5><p class="modal-subtitle">Use a product or environment name.</p></div><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
         <div class="modal-body service-form-fields">
-            <div><label class="field-label" for="patch-system-name-input">System name</label><input id="patch-system-name-input" class="form-control" maxlength="120" required placeholder="e.g. Sample App UAT"></div>
-            <div><label class="field-label" for="patch-system-output-input">Patch output folder <span class="text-muted fw-normal">(optional)</span></label><input id="patch-system-output-input" class="form-control" maxlength="2048" placeholder="e.g. C:\Patches\MyApp"><div class="form-text">Compiled patches are saved here. Leave empty to use DevTools' deployments folder. It must be outside the module folders.</div></div>
+            <div><label class="field-label" for="patch-system-name-input">System name</label><input id="patch-system-name-input" class="form-control" maxlength="120" required placeholder="Name of the system"></div>
+            <div><label class="field-label" for="patch-system-output-input">Patch output folder <span class="text-muted fw-normal">(optional)</span></label><input id="patch-system-output-input" class="form-control" maxlength="2048" placeholder="Full path of the patch output folder"><div class="form-text">Compiled patches are saved here. Leave empty to use DevTools' deployments folder. It must be outside the module folders.</div></div>
         </div>
         <div class="modal-footer"><button type="button" class="btn btn-ghost" data-bs-dismiss="modal">Cancel</button><button id="patch-system-submit" class="btn btn-primary" type="submit">Add system</button></div>
     </form></div>
@@ -89,9 +89,9 @@
     <div class="modal-dialog modal-lg modal-dialog-centered"><form id="patch-module-form" class="modal-content">
         <div class="modal-header"><div><h5 class="modal-title" id="patch-module-modal-title">Add module</h5><p class="modal-subtitle">Point it at the module's compiled output folder.</p></div><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
         <div class="modal-body deploy-module-form">
-            <div><label class="field-label" for="patch-module-name">Module name (folder in the patch)</label><input id="patch-module-name" class="form-control" maxlength="120" required placeholder="e.g. WebApi"></div>
-            <div><label class="field-label" for="patch-module-source">Module folder</label><input id="patch-module-source" class="form-control" maxlength="2048" required placeholder="e.g. C:\Build\MyApp\WebApi"></div>
-            <div class="deploy-span-2"><label class="field-label" for="patch-module-exclusions">Files to ignore <span class="text-muted fw-normal">(optional)</span></label><textarea id="patch-module-exclusions" class="form-control code-input" rows="4" maxlength="4000" spellcheck="false" placeholder="web.config&#10;appsettings*.json&#10;logs/"></textarea><div class="form-text">Ignored files are never tracked or included in a patch. One pattern per line: a name matches at any depth, <code>*</code> and <code>?</code> are wildcards, a trailing <code>/</code> means a folder, and <code>**</code> spans folders.</div></div>
+            <div><label class="field-label" for="patch-module-name">Module name (folder in the patch)</label><input id="patch-module-name" class="form-control" maxlength="120" required placeholder="Folder name of the module in the patch"></div>
+            <div><label class="field-label" for="patch-module-source">Module folder</label><input id="patch-module-source" class="form-control" maxlength="2048" required placeholder="Full path of the module's build output folder"></div>
+            <div class="deploy-span-2"><label class="field-label" for="patch-module-exclusions">Files to ignore <span class="text-muted fw-normal">(optional)</span></label><textarea id="patch-module-exclusions" class="form-control code-input" rows="4" maxlength="4000" spellcheck="false" placeholder="One file or folder pattern per line"></textarea><div class="form-text">Ignored files are never tracked or included in a patch. One pattern per line: a name matches at any depth, <code>*</code> and <code>?</code> are wildcards, a trailing <code>/</code> means a folder, and <code>**</code> spans folders.</div></div>
         </div>
         <div class="modal-footer"><button type="button" class="btn btn-ghost" data-bs-dismiss="modal">Cancel</button><button id="patch-module-submit" class="btn btn-primary" type="submit">Add module</button></div>
     </form></div>
@@ -112,7 +112,7 @@
                     <label><input type="radio" name="patch-format" value="7z"><span><strong>.7z</strong><small>Smaller; needs 7-Zip to open</small></span></label>
                 </div>
             </div>
-            <div><label class="field-label" for="patch-compile-label">Description <span class="text-muted fw-normal">(optional)</span></label><input id="patch-compile-label" class="form-control" maxlength="500" placeholder="e.g. Redmine #1234 — invoice export fix"></div>
+            <div><label class="field-label" for="patch-compile-label">Description <span class="text-muted fw-normal">(optional)</span></label><input id="patch-compile-label" class="form-control" maxlength="500" placeholder="What this patch is for"></div>
             <label class="patch-option"><input id="patch-compile-latest" class="form-check-input" type="checkbox"><span><strong>Make this the latest version</strong><small>Tick when this patch goes to UAT/production now. The selected modules' next changes are then measured from it; other modules keep their own version. You can also do this later from the patch.</small></span></label>
             <div class="patch-compile-structure"><strong>Inside the patch</strong><code>&lt;module&gt;/ADDED/…</code><code>&lt;module&gt;/CHANGED/…</code><code>&lt;module&gt;/DELETED/DELETED-FILES.txt</code><code>PATCH-NOTES.txt</code></div>
         </div>
@@ -126,7 +126,7 @@
         <div class="modal-body service-form-fields">
             <p class="mb-0">Takes a snapshot of the selected modules' files now and marks it as their version on UAT/production. Their later changes are measured from it; other modules keep their own version.</p>
             <div><div class="patch-field-head"><span class="field-label">Modules</span></div><div id="patch-latest-modules" class="patch-check-list"></div></div>
-            <div><label class="field-label" for="patch-latest-label">Label <span class="text-muted fw-normal">(optional)</span></label><input id="patch-latest-label" class="form-control" maxlength="500" placeholder="e.g. Production release 2.4"></div>
+            <div><label class="field-label" for="patch-latest-label">Label <span class="text-muted fw-normal">(optional)</span></label><input id="patch-latest-label" class="form-control" maxlength="500" placeholder="Name for this version"></div>
         </div>
         <div class="modal-footer"><button type="button" class="btn btn-ghost" data-bs-dismiss="modal">Cancel</button><button id="patch-latest-submit" class="btn btn-primary" type="submit">Set as latest</button></div>
     </form></div>

@@ -1105,3 +1105,25 @@ html[data-theme="dark"] .patch-chip.latest { border-color:rgba(34,197,94,.35); b
 #deployRunModal .btn-deploy-gradient { --bs-btn-color:#fff; --bs-btn-hover-color:#fff; --bs-btn-active-color:#fff; --bs-btn-disabled-color:#fff; min-width:96px; border:0; background:linear-gradient(135deg,#2563eb 0%,#7c3aed 100%); color:#fff; font-weight:750; box-shadow:0 4px 12px rgba(99,70,235,.3); transition:box-shadow .15s, transform .15s; }
 #deployRunModal .btn-deploy-gradient:hover:not(:disabled),#deployRunModal .btn-deploy-gradient:focus-visible { background:linear-gradient(135deg,#1d4ed8 0%,#6d28d9 100%); color:#fff; box-shadow:0 6px 16px rgba(99,70,235,.42); transform:translateY(-1px); }
 #deployRunModal .btn-deploy-gradient:disabled { background:linear-gradient(135deg,#2563eb 0%,#7c3aed 100%); color:#fff; opacity:.45; box-shadow:none; }
+/* Deployment: main-file version check */
+.deploy-version-option { display:flex; align-items:flex-start; gap:.6rem; margin:0; padding:.6rem .75rem; border:1px solid var(--line); border-radius:10px; cursor:pointer; }
+.deploy-version-option:has(input:checked) { border-color:#7c3aed; background:color-mix(in srgb,#7c3aed 6%,transparent); }
+.deploy-version-option .form-check-input { flex:0 0 auto; margin-top:.15rem; }
+.deploy-version-option span { display:flex; flex-direction:column; gap:.1rem; }
+.deploy-version-option strong { color:var(--ink); font-size:.84rem; }
+.deploy-version-option small { color:var(--muted); font-size:.74rem; }
+.deploy-version-line { display:flex; align-items:center; gap:.45rem; margin:.1rem 0 .5rem; padding:.35rem .6rem; border-radius:8px; background:var(--surface-soft); color:var(--muted); font-size:.76rem; }
+.deploy-version-line code { color:var(--ink); }
+.deploy-version-icon { display:inline-flex; width:1.25rem; height:1.25rem; flex:0 0 auto; align-items:center; justify-content:center; border-radius:999px; background:color-mix(in srgb,var(--muted) 18%,transparent); font-weight:800; font-size:.75rem; }
+.deploy-version-line.state-newer { background:color-mix(in srgb,#12b76a 10%,transparent); color:#067647; }
+.deploy-version-line.state-newer .deploy-version-icon { background:#12b76a; color:#fff; }
+.deploy-version-line.state-older,.deploy-version-line.state-same { background:color-mix(in srgb,#f79009 12%,transparent); color:#b54708; }
+.deploy-version-line.state-older .deploy-version-icon,.deploy-version-line.state-same .deploy-version-icon { background:#f79009; color:#fff; }
+.deploy-version-line.blocking { background:color-mix(in srgb,#f04438 12%,transparent); color:#b42318; font-weight:650; }
+.deploy-version-line.blocking .deploy-version-icon { background:#f04438; color:#fff; }
+html[data-theme="dark"] .deploy-version-line.state-newer { color:#4ade80; }
+html[data-theme="dark"] .deploy-version-line.state-older,html[data-theme="dark"] .deploy-version-line.state-same { color:#fdb022; }
+html[data-theme="dark"] .deploy-version-line.blocking { color:#f87171; }
+/* Toasts: top right, just below the sticky header, above dialogs */
+.app-toast-container { top:64px !important; z-index:1095; max-width:min(420px,calc(100vw - 1rem)); }
+.app-toast-container .toast { width:auto; max-width:100%; }

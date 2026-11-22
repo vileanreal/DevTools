@@ -8,7 +8,7 @@ namespace DevTools.Web.Data;
 
 public static class DatabaseInitializer
 {
-    private const int CurrentSchemaVersion = 7;
+    private const int CurrentSchemaVersion = 9;
     private static readonly string[] ApplicationTables =
     [
         "LogSystems", "LogSources", "SqlDocSources", "SqlDocDiagrams", "ServiceSystems", "ManagedServices",
@@ -117,7 +117,8 @@ public static class DatabaseInitializer
                 Id INTEGER NOT NULL CONSTRAINT PK_DeploymentSystems PRIMARY KEY AUTOINCREMENT,
                 Name TEXT NOT NULL,
                 BackupDirectory TEXT NULL,
-                PackageDirectory TEXT NULL
+                PackageDirectory TEXT NULL,
+                RequireVersionChange INTEGER NOT NULL DEFAULT 0
             )
             """, transaction);
         Execute(connection, """
@@ -129,6 +130,7 @@ public static class DatabaseInitializer
                 AppPoolName TEXT NULL,
                 ServiceName TEXT NULL,
                 DefaultExclusions TEXT NULL,
+                VersionFile TEXT NULL,
                 CONSTRAINT FK_DeploymentModules_DeploymentSystems_DeploymentSystemId FOREIGN KEY (DeploymentSystemId) REFERENCES DeploymentSystems (Id) ON DELETE CASCADE
             )
             """, transaction);
@@ -241,6 +243,9 @@ public static class DatabaseInitializer
         var columns = Columns(connection, transaction, "DeploymentSystems");
         if (!columns.Contains("PackageDirectory")) Execute(connection, "ALTER TABLE DeploymentSystems ADD COLUMN PackageDirectory TEXT NULL", transaction);
         if (!Columns(connection, transaction, "DeploymentPackages").Contains("Description")) Execute(connection, "ALTER TABLE DeploymentPackages ADD COLUMN Description TEXT NULL", transaction);
+        // v9 (v8 is used by the 1.4 line): optional "require a new version" check per system, main file per module.
+        if (!columns.Contains("RequireVersionChange")) Execute(connection, "ALTER TABLE DeploymentSystems ADD COLUMN RequireVersionChange INTEGER NOT NULL DEFAULT 0", transaction);
+        if (!Columns(connection, transaction, "DeploymentModules").Contains("VersionFile")) Execute(connection, "ALTER TABLE DeploymentModules ADD COLUMN VersionFile TEXT NULL", transaction);
     }
 
     /// <summary>
@@ -319,6 +324,8 @@ public static class DatabaseInitializer
         string[] requiredColumns = ["Format", "CustomPattern", "TimestampFormat", "IncludeSubdirectories", "FileNameFilter"];
         if (requiredColumns.Any(column => !columns.Contains(column))) return true;
         return !Columns(connection, null, "DeploymentSystems").Contains("PackageDirectory")
+            || !Columns(connection, null, "DeploymentSystems").Contains("RequireVersionChange")
+            || !Columns(connection, null, "DeploymentModules").Contains("VersionFile")
             || !Columns(connection, null, "DeploymentPackages").Contains("Description")
             || !Columns(connection, null, "PatchModules").Contains("LatestSnapshotId")
             || !Columns(connection, null, "PatchSnapshots").Contains("Modules")

@@ -6,6 +6,8 @@ public sealed class DeploymentSystem
     public required string Name { get; set; }
     public string? BackupDirectory { get; set; }
     public string? PackageDirectory { get; set; }
+    /// <summary>When on, a module whose main file (<see cref="DeploymentModule.VersionFile"/>) has the same version as on the server can't be deployed.</summary>
+    public bool RequireVersionChange { get; set; }
     public List<DeploymentModule> Modules { get; set; } = [];
     public List<DeploymentPackage> Packages { get; set; } = [];
 }
@@ -19,6 +21,8 @@ public sealed class DeploymentModule
     public string? AppPoolName { get; set; }
     public string? ServiceName { get; set; }
     public string? DefaultExclusions { get; set; }
+    /// <summary>The module's main exe or dll, relative to the module folder; its file version is compared before deploying.</summary>
+    public string? VersionFile { get; set; }
     public DeploymentSystem? DeploymentSystem { get; set; }
 }
 

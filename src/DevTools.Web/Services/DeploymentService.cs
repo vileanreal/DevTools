@@ -21,6 +21,7 @@ public interface IDeploymentService
     Task<DeploymentPackageDto> SavePackageAsync(int systemId, string fileName, string? description, Stream content, string? actor, CancellationToken cancellationToken);
     Task DeletePackageAsync(int id, CancellationToken cancellationToken);
     Task<DeploymentFilePreview> PreviewFilesAsync(int packageId, DeploymentFilePreviewRequest request, CancellationToken cancellationToken);
+    Task<IReadOnlyList<DeploymentVersionCheck>> CheckVersionsAsync(int packageId, CancellationToken cancellationToken);
     Task<DeploymentPackageContents> GetContentsAsync(int packageId, CancellationToken cancellationToken);
 }
 
@@ -30,6 +31,7 @@ public sealed class DeploymentService(
     IPackageArchiveService archives,
     IDeploymentPaths paths,
     IDeploymentJobRegistry jobs,
+    IDeploymentVersionChecker versions,
     IOptions<DeploymentOptions> options) : IDeploymentService
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
@@ -52,7 +54,7 @@ public sealed class DeploymentService(
         DeploymentSystem entity;
         if (id is null)
         {
-            entity = new DeploymentSystem { Name = name, BackupDirectory = backup, PackageDirectory = packageFolder };
+            entity = new DeploymentSystem { Name = name, BackupDirectory = backup, PackageDirectory = packageFolder, RequireVersionChange = request.RequireVersionChange };
             database.DeploymentSystems.Add(entity);
         }
         else
@@ -62,6 +64,7 @@ public sealed class DeploymentService(
             entity.Name = name;
             entity.BackupDirectory = backup;
             entity.PackageDirectory = packageFolder;
+            entity.RequireVersionChange = request.RequireVersionChange;
             // Backups and packages must never sit inside a module folder: a whole-package deployment would delete them.
             EnsureStorageOutsideModules(entity, entity.Modules);
         }
@@ -91,6 +94,7 @@ public sealed class DeploymentService(
         if (exclusionsError is not null) throw new ArgumentException(exclusionsError);
         var appPool = Optional(request.AppPoolName, "App pool name", 260);
         var service = Optional(request.ServiceName, "Windows service name", 260);
+        var versionFile = DeploymentVersionFile.Normalize(request.VersionFile);
 
         var system = await database.DeploymentSystems.AsNoTracking().FirstOrDefaultAsync(item => item.Id == systemId, cancellationToken)
             ?? throw new KeyNotFoundException("Deployment system not found.");
@@ -115,6 +119,7 @@ public sealed class DeploymentService(
         entity.AppPoolName = appPool;
         entity.ServiceName = service;
         entity.DefaultExclusions = DeploymentPathMatcher.Normalize(request.DefaultExclusions);
+        entity.VersionFile = versionFile;
         await database.SaveChangesAsync(cancellationToken);
         return ToDto(entity);
     }
@@ -255,6 +260,17 @@ public sealed class DeploymentService(
     /// Lists what deploying one module would do, without changing anything: package files that are new, replace an
     /// existing file, or are excluded; and for a whole-package update, existing files that would be deleted or kept.
     /// </summary>
+    /// <summary>Each module's main-file version in the package and on the server, for modules that have a main file set.</summary>
+    public async Task<IReadOnlyList<DeploymentVersionCheck>> CheckVersionsAsync(int packageId, CancellationToken cancellationToken)
+    {
+        var package = await database.DeploymentPackages.AsNoTracking().Include(item => item.DeploymentSystem!).ThenInclude(item => item.Modules)
+            .FirstOrDefaultAsync(item => item.Id == packageId, cancellationToken) ?? throw new KeyNotFoundException("Package not found.");
+        if (!File.Exists(package.StoredPath)) throw new InvalidOperationException("The uploaded package file is missing. Upload it again.");
+        var analysis = JsonSerializer.Deserialize<DeploymentPackageAnalysis>(package.AnalysisJson, Json)!;
+        var modules = DeploymentVersionFile.Modules(package.DeploymentSystem!.Modules, analysis);
+        return await Task.Run(() => versions.Check(package.StoredPath, analysis.WrapperFolder, modules, package.DeploymentSystem.RequireVersionChange, cancellationToken), cancellationToken);
+    }
+
     public async Task<DeploymentFilePreview> PreviewFilesAsync(int packageId, DeploymentFilePreviewRequest request, CancellationToken cancellationToken)
     {
         var package = await database.DeploymentPackages.AsNoTracking().Include(item => item.DeploymentSystem!).ThenInclude(item => item.Modules)
@@ -346,10 +362,10 @@ public sealed class DeploymentService(
 
     private DeploymentSystemDto ToDto(DeploymentSystem entity) =>
         new(entity.Id, entity.Name, entity.BackupDirectory, paths.BackupDirectory(entity), entity.PackageDirectory, paths.PackageDirectory(entity),
-            entity.Modules.OrderBy(module => module.Name).Select(ToDto).ToList());
+            entity.Modules.OrderBy(module => module.Name).Select(ToDto).ToList(), entity.RequireVersionChange);
 
     private static DeploymentModuleDto ToDto(DeploymentModule entity) =>
-        new(entity.Id, entity.DeploymentSystemId, entity.Name, entity.TargetPath, entity.AppPoolName, entity.ServiceName, entity.DefaultExclusions);
+        new(entity.Id, entity.DeploymentSystemId, entity.Name, entity.TargetPath, entity.AppPoolName, entity.ServiceName, entity.DefaultExclusions, entity.VersionFile);
 
     private static DeploymentPackageDto ToDto(DeploymentPackage entity, bool canRollback, string? rollbackBlockedReason, string? rollbackWarning, bool busy)
     {
@@ -418,4 +434,27 @@ public sealed class DeploymentService(
     {
         try { if (path is not null && File.Exists(path)) File.Delete(path); } catch (IOException) { } catch (UnauthorizedAccessException) { }
     }
+}
+
+/// <summary>Validation of a module's main-file path, and which modules of a package can be version-checked.</summary>
+public static class DeploymentVersionFile
+{
+    public static string? Normalize(string? value)
+    {
+        var text = value?.Trim().Replace('\\', '/').TrimStart('/');
+        if (string.IsNullOrEmpty(text)) return null;
+        if (text.Length > 500) throw new ArgumentException("The main file path must be 500 characters or fewer.");
+        if (text.Contains(':') || text.Split('/').Any(part => part is "" or "." or ".."))
+            throw new ArgumentException("Enter the main file as a path inside the module folder, without a drive or “..”.");
+        if (!text.EndsWith(".dll", StringComparison.OrdinalIgnoreCase) && !text.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+            throw new ArgumentException("The main file must be an .exe or .dll, because its file version is read.");
+        return text;
+    }
+
+    public static IReadOnlyList<VersionCheckModule> Modules(IEnumerable<DeploymentModule> modules, DeploymentPackageAnalysis analysis, IReadOnlyCollection<int>? only = null) =>
+        modules.Where(module => !string.IsNullOrWhiteSpace(module.VersionFile) && (only is null || only.Contains(module.Id)))
+            .Select(module => (module, folder: analysis.Modules.FirstOrDefault(item => item.ModuleId == module.Id)))
+            .Where(item => item.folder is not null)
+            .Select(item => new VersionCheckModule(item.module.Id, item.module.Name, item.module.VersionFile!, item.folder!.FolderName, item.module.TargetPath))
+            .OrderBy(item => item.ModuleName, StringComparer.OrdinalIgnoreCase).ToList();
 }

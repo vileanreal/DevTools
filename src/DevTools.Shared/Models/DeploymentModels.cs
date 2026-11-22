@@ -40,10 +40,34 @@ public sealed record DeploymentPackageFile(string Path, long Size);
 public sealed record DeploymentPackageModuleContents(string FolderName, string? ModuleName, IReadOnlyList<DeploymentPackageFile> Files, bool Truncated);
 public sealed record DeploymentPackageContents(int PackageId, IReadOnlyList<DeploymentPackageModuleContents> Modules);
 
-public sealed record DeploymentModuleDto(int Id, int SystemId, string Name, string TargetPath, string? AppPoolName, string? ServiceName, string? DefaultExclusions);
-public sealed record DeploymentSystemDto(int Id, string Name, string? BackupDirectory, string EffectiveBackupDirectory, string? PackageDirectory, string EffectivePackageDirectory, IReadOnlyList<DeploymentModuleDto> Modules);
-public sealed record SaveDeploymentSystemRequest(string? Name, string? BackupDirectory, string? PackageDirectory = null);
-public sealed record SaveDeploymentModuleRequest(string? Name, string? TargetPath, string? AppPoolName, string? ServiceName, string? DefaultExclusions);
+public sealed record DeploymentModuleDto(int Id, int SystemId, string Name, string TargetPath, string? AppPoolName, string? ServiceName, string? DefaultExclusions, string? VersionFile = null);
+public sealed record DeploymentSystemDto(int Id, string Name, string? BackupDirectory, string EffectiveBackupDirectory, string? PackageDirectory, string EffectivePackageDirectory, IReadOnlyList<DeploymentModuleDto> Modules, bool RequireVersionChange = false);
+public sealed record SaveDeploymentSystemRequest(string? Name, string? BackupDirectory, string? PackageDirectory = null, bool RequireVersionChange = false);
+public sealed record SaveDeploymentModuleRequest(string? Name, string? TargetPath, string? AppPoolName, string? ServiceName, string? DefaultExclusions, string? VersionFile = null);
+
+/// <summary>
+/// The main file's version in a package compared with the one on the server. <see cref="Blocking"/> is set when the
+/// system requires a new version and this module can't be deployed; <see cref="Message"/> explains either case.
+/// </summary>
+public sealed record DeploymentVersionCheck(
+    int ModuleId,
+    string ModuleName,
+    string VersionFile,
+    string? PackageVersion,
+    string? ServerVersion,
+    string State,
+    bool Blocking,
+    string Message);
+
+public static class DeploymentVersionStates
+{
+    public const string Newer = "newer";
+    public const string Older = "older";
+    public const string Same = "same";
+    public const string FirstDeploy = "first-deploy";
+    public const string NotInPackage = "not-in-package";
+    public const string Unreadable = "unreadable";
+}
 
 /// <summary>One top-level module folder found in an uploaded package.</summary>
 public sealed record DeploymentPackageModule(string FolderName, int? ModuleId, string? ModuleName, int FileCount, long TotalBytes);

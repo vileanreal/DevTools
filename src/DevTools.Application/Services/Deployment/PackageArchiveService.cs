@@ -27,6 +27,12 @@ public interface IPackageArchiveService
     /// <summary>Writes a .7z archive (LZMA2) from files on disk plus optional in-memory text entries. Streams each file; nothing is buffered whole.</summary>
     void CreateSevenZip(string archivePath, IEnumerable<ArchiveSource> files, IReadOnlyDictionary<string, string>? textEntries, Action<string>? onFile, CancellationToken cancellationToken);
 
+    /// <summary>
+    /// Opens the file entries that <paramref name="want"/> accepts, one at a time, in a single pass (so solid .7z archives
+    /// are decompressed once). The stream passed to <paramref name="read"/> is only valid during the call.
+    /// </summary>
+    void ReadEntries(string archivePath, Func<string, bool> want, Action<string, Stream> read, CancellationToken cancellationToken);
+
     /// <summary>Reads one small text entry (such as a manifest), or null when it is missing.</summary>
     string? ReadText(string archivePath, string entryName, CancellationToken cancellationToken);
 }
@@ -159,6 +165,31 @@ public sealed class PackageArchiveService : IPackageArchiveService
         finally
         {
             if (File.Exists(temporary)) File.Delete(temporary);
+        }
+    }
+
+    public void ReadEntries(string archivePath, Func<string, bool> want, Action<string, Stream> read, CancellationToken cancellationToken)
+    {
+        using var archive = Open(archivePath);
+        if (archive.IsSolid || archive.Type == ArchiveType.SevenZip)
+        {
+            using var reader = archive.ExtractAllEntries();
+            while (reader.MoveToNextEntry())
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var entry = reader.Entry;
+                if (entry.IsDirectory || entry.Key is null || !want(entry.Key)) continue;
+                using var stream = reader.OpenEntryStream();
+                read(entry.Key, stream);
+            }
+            return;
+        }
+        foreach (var entry in archive.Entries)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (entry.IsDirectory || entry.Key is null || !want(entry.Key)) continue;
+            using var stream = entry.OpenEntryStream();
+            read(entry.Key, stream);
         }
     }
 

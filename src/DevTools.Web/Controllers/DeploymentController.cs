@@ -104,6 +104,11 @@ public sealed class DeploymentController(
     public Task<ActionResult<ApiResult<DeploymentFilePreview>>> Preview(int id, DeploymentFilePreviewRequest request, CancellationToken cancellationToken) =>
         Run(() => service.PreviewFilesAsync(id, request, cancellationToken));
 
+    /// <summary>Each module's main-file version in the package and on the server (and whether the system's version rule blocks it).</summary>
+    [HttpGet("packages/{id:int}/versions")]
+    public Task<ActionResult<ApiResult<IReadOnlyList<DeploymentVersionCheck>>>> Versions(int id, CancellationToken cancellationToken) =>
+        Run(() => service.CheckVersionsAsync(id, cancellationToken));
+
     [HttpPost("packages/{id:int}/deploy")]
     public Task<ActionResult<ApiResult<DeploymentJobStatus>>> Deploy(int id, DeployPackageRequest request, CancellationToken cancellationToken) =>
         Run(() => jobs.StartDeployAsync(id, request, Actor, cancellationToken));

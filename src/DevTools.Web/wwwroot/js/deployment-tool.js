@@ -8,6 +8,8 @@
   // Bootstrap can't stack two dialogs, so the module form temporarily replaces the manager and returns to it.
   let returnToManager = false;
   let systems = [], packages = [], selectedSystemId = null, editingSystemId = null, editingModuleId = null;
+  // versionChecks: main-file version per module for the package in the Deploy dialog (moduleId → check).
+  let versionChecks = new Map(), versionToken = 0;
   let deployPackageId = null, rollbackPackageId = null, job = null, pollTimer = null, upload = null, stagedFile = null;
 
   const selectedSystem = () => systems.find(item => item.id === selectedSystemId);
@@ -91,7 +93,7 @@
       const exclusions = module.defaultExclusions ? module.defaultExclusions.split('\n').length : 0;
       return `<article class="deploy-module-row" data-module-id="${module.id}">
         <span class="deploy-module-icon" aria-hidden="true">${module.appPoolName ? 'IIS' : module.serviceName ? '⚙' : '▣'}</span>
-        <span class="deploy-module-main"><strong>${escapeHtml(module.name)}</strong><code title="${escapeHtml(module.targetPath)}">${escapeHtml(module.targetPath)}</code><span class="deploy-module-chips">${controls}${exclusions ? `<span class="deploy-chip muted" title="${escapeHtml(module.defaultExclusions)}">${plural(exclusions, 'exclusion')}</span>` : ''}</span></span>
+        <span class="deploy-module-main"><strong>${escapeHtml(module.name)}</strong><code title="${escapeHtml(module.targetPath)}">${escapeHtml(module.targetPath)}</code><span class="deploy-module-chips">${controls}${module.versionFile ? `<span class="deploy-chip" title="Main file whose version is checked before deploying">Version: ${escapeHtml(module.versionFile)}</span>` : ''}${exclusions ? `<span class="deploy-chip muted" title="${escapeHtml(module.defaultExclusions)}">${plural(exclusions, 'exclusion')}</span>` : ''}</span></span>
         <span class="deploy-row-actions"><button class="btn btn-sm btn-ghost module-edit" type="button">Edit</button><button class="icon-button module-delete" type="button" title="Remove module" aria-label="Remove ${escapeHtml(module.name)}">×</button></span>
       </article>`;
     }).join('') : '<div class="empty-state compact">No modules yet. Add one for each folder in your packages.</div>';
@@ -107,6 +109,7 @@
     byId('deploy-system-name-input').value = system?.name ?? '';
     byId('deploy-system-backup-input').value = system?.backupDirectory ?? '';
     byId('deploy-system-package-input').value = system?.packageDirectory ?? '';
+    byId('deploy-system-require-version').checked = Boolean(system?.requireVersionChange);
     byId('deploy-system-modal-title').textContent = system ? 'Edit system' : 'Add system';
     byId('deploy-system-submit').textContent = system ? 'Save changes' : 'Add system';
     systemModal.show();
@@ -114,7 +117,7 @@
 
   const saveSystem = async event => {
     event.preventDefault();
-    const body = { name:byId('deploy-system-name-input').value, backupDirectory:byId('deploy-system-backup-input').value || null, packageDirectory:byId('deploy-system-package-input').value || null };
+    const body = { name:byId('deploy-system-name-input').value, backupDirectory:byId('deploy-system-backup-input').value || null, packageDirectory:byId('deploy-system-package-input').value || null, requireVersionChange:byId('deploy-system-require-version').checked };
     try {
       const saved = await jsonRequest(editingSystemId ? `/api/deployment/systems/${editingSystemId}` : '/api/deployment/systems', editingSystemId ? 'PUT' : 'POST', body);
       systemModal.hide(); await loadSystems(); notify(editingSystemId ? 'System updated.' : 'System added.');
@@ -140,6 +143,7 @@
     byId('deploy-module-apppool').value = module?.appPoolName ?? '';
     byId('deploy-module-service').value = module?.serviceName ?? '';
     byId('deploy-module-exclusions').value = module?.defaultExclusions ?? '';
+    byId('deploy-module-version-file').value = module?.versionFile ?? '';
     byId('deploy-module-modal-title').textContent = module ? 'Edit module' : 'Add module';
     byId('deploy-module-submit').textContent = module ? 'Save changes' : 'Add module';
     moduleModal.show();
@@ -147,7 +151,7 @@
 
   const saveModule = async event => {
     event.preventDefault();
-    const body = { name:byId('deploy-module-name').value, targetPath:byId('deploy-module-target').value, appPoolName:byId('deploy-module-apppool').value || null, serviceName:byId('deploy-module-service').value || null, defaultExclusions:byId('deploy-module-exclusions').value || null };
+    const body = { name:byId('deploy-module-name').value, targetPath:byId('deploy-module-target').value, appPoolName:byId('deploy-module-apppool').value || null, serviceName:byId('deploy-module-service').value || null, defaultExclusions:byId('deploy-module-exclusions').value || null , versionFile:byId('deploy-module-version-file').value || null };
     try {
       await jsonRequest(editingModuleId ? `/api/deployment/systems/${selectedSystemId}/modules/${editingModuleId}` : `/api/deployment/systems/${selectedSystemId}/modules`, editingModuleId ? 'PUT' : 'POST', body);
       moduleModal.hide(); await loadSystems(); notify(editingModuleId ? 'Module updated.' : 'Module added.');
@@ -488,9 +492,10 @@
             <label><input type="radio" name="mode-${module.id}" value="full"><span><strong>Whole package</strong><small>Delete everything except excluded files, then copy</small></span></label>
           </div>
         </header>
+        ${module.versionFile ? `<p class="deploy-version-line" data-version-for="${module.id}"><span class="spinner-border spinner-border-sm" aria-hidden="true"></span> Checking the version of <code>${escapeHtml(module.versionFile)}</code>…</p>` : ''}
         <p class="deploy-mode-required">Choose Partial update or Whole package.</p>
         <label class="field-label" for="run-exclusions-${module.id}">Files to exclude when replacing</label>
-        <textarea id="run-exclusions-${module.id}" class="form-control code-input run-exclusions" rows="2" maxlength="4000" spellcheck="false" placeholder="web.config&#10;logs/">${escapeHtml(module.defaultExclusions || '')}</textarea>
+        <textarea id="run-exclusions-${module.id}" class="form-control code-input run-exclusions" rows="2" maxlength="4000" spellcheck="false" placeholder="One file or folder pattern per line">${escapeHtml(module.defaultExclusions || '')}</textarea>
         <p class="deploy-full-warning d-none">Whole package deletes every file in this folder that isn't excluded, and backs up the entire folder first.</p>
         <details class="deploy-preview"><summary>Show files</summary><div class="deploy-preview-body"><div class="empty-state compact">Loading…</div></div></details>
       </section>`;
@@ -512,8 +517,32 @@
       sync();
     });
     byId('deploy-run-autorestore').checked = true;
+    versionChecks = new Map();
     updateRunSummary();
     runModal.show();
+    loadVersions(packageId);
+  };
+
+  // Shows each module's main-file version (package vs server). When the system requires a new version, a module whose
+  // version didn't change blocks Deploy; the server checks the same rule again when the deployment starts.
+  const versionIcons = { newer:'↑', older:'⚠', same:'=', 'first-deploy':'+', 'not-in-package':'∅', unreadable:'?' };
+  const loadVersions = async packageId => {
+    const token = ++versionToken, lines = [...byId('deploy-run-modules').querySelectorAll('[data-version-for]')];
+    if (!lines.length) return;
+    try {
+      const checks = await jsonRequest(`/api/deployment/packages/${packageId}/versions`);
+      if (token !== versionToken) return;
+      versionChecks = new Map(checks.map(check => [check.moduleId, check]));
+      lines.forEach(line => {
+        const check = versionChecks.get(Number(line.dataset.versionFor));
+        if (!check) { line.remove(); return; }
+        line.className = `deploy-version-line state-${check.state}${check.blocking ? ' blocking' : ''}`;
+        line.innerHTML = `<span class="deploy-version-icon" aria-hidden="true">${versionIcons[check.state] || 'i'}</span><span>${check.message.startsWith(check.versionFile) ? `<code>${escapeHtml(check.versionFile)}</code>${escapeHtml(check.message.slice(check.versionFile.length))}` : `<code>${escapeHtml(check.versionFile)}</code> ${escapeHtml(check.message)}`}</span>`;
+      });
+    } catch (error) {
+      if (token === versionToken) lines.forEach(line => { line.className = 'deploy-version-line blocking'; line.textContent = `Couldn't check the version: ${error.message}`; });
+    }
+    updateRunSummary();
   };
 
   const previewLabels = { new:'New', replace:'Replace', excluded:'Excluded', delete:'Delete', keep:'Kept' };
@@ -564,12 +593,14 @@
   const updateRunSummary = () => {
     const selections = runSelections(), missing = selections.filter(item => !item.mode), full = selections.filter(item => item.mode === 'full').length;
     // Only shown while something blocks Deploy: no module selected, or a module without an update type.
+    const blocked = selections.filter(item => versionChecks.get(item.moduleId)?.blocking);
     const message = !selections.length ? 'Select at least one module'
-      : missing.length ? `Choose the update type for ${missing.map(item => item.name).join(', ')}` : '';
+      : missing.length ? `Choose the update type for ${missing.map(item => item.name).join(', ')}`
+      : blocked.length ? `Update the version of ${blocked.map(item => item.name).join(', ')} — this system requires a new version` : '';
     byId('deploy-run-summary-text').textContent = message;
     byId('deploy-run-summary').classList.toggle('d-none', !message);
     byId('deploy-run-submit').title = full ? `${plural(full, 'module')} will be replaced as a whole package` : '';
-    byId('deploy-run-submit').disabled = !selections.length || missing.length > 0;
+    byId('deploy-run-submit').disabled = !selections.length || missing.length > 0 || blocked.length > 0;
   };
 
   const submitDeploy = async event => {

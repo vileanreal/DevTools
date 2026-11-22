@@ -31,6 +31,7 @@ public sealed class DeploymentJobService(
     IDeploymentExecutor executor,
     IPackageArchiveService archives,
     IDeploymentPaths paths,
+    IDeploymentVersionChecker versionChecker,
     ILogger<DeploymentJobService> logger) : IDeploymentJobService
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
@@ -182,6 +183,11 @@ public sealed class DeploymentJobService(
             paths.EnsureSafeTargetFolder(module.TargetPath);
             selected.Add((module, folder, selection.Mode!, DeploymentPathMatcher.Normalize(selection.Exclusions)));
         }
+        // The system can require every deployed module's main file to have a new version (not the same as on the server).
+        var versionChecks = await Task.Run(() => versionChecker.Check(package.StoredPath, analysis.WrapperFolder,
+            DeploymentVersionFile.Modules(system.Modules, analysis, selected.Select(item => item.Module.Id).ToList()), system.RequireVersionChange, cancellationToken), cancellationToken);
+        var blocked = versionChecks.Where(check => check.Blocking).ToList();
+        if (blocked.Count > 0) throw new ArgumentException(string.Join(" ", blocked.Select(check => $"{check.ModuleName}: {check.Message}")));
         var backupDirectory = paths.BackupDirectory(system);
         var overlapping = selected.FirstOrDefault(item => paths.Overlaps(item.Module.TargetPath, backupDirectory));
         if (overlapping.Module is not null) throw new ArgumentException($"The backup folder overlaps {overlapping.Module.Name}'s folder. Choose a backup folder outside the modules.");
@@ -210,7 +216,7 @@ public sealed class DeploymentJobService(
                     string.IsNullOrWhiteSpace(actor) ? null : $"By: {actor}",
                     $"Backup: {job.BackupFileName} in {backupDirectory}",
                     $"Auto-restore: {(request.AutoRestore ? "on" : "off")}"
-                }.Where(line => line is not null).Concat(selected.Select(item =>
+                }.Where(line => line is not null).Concat(versionChecks.Select(check => (string?)$"{check.ModuleName} version: {check.Message}")).Concat(selected.Select(item =>
                     $"{item.Module.Name} — {(item.Mode == DeploymentModes.Full ? "whole package" : "partial update")} → {item.Module.TargetPath}"
                     + (item.Exclusions is null ? "" : $" · excluding {item.Exclusions.Replace("\n", ", ")}")
                     + (string.IsNullOrWhiteSpace(item.Module.AppPoolName) ? "" : $" · app pool {item.Module.AppPoolName}")
