@@ -8,7 +8,7 @@
   // changes: the last check of the module folders. selection: module ids ticked for the next patch / set-as-latest.
   let changes = null, checking = false, selection = new Set(), selectionTouched = false, checkToken = 0;
   const pages = { packages: { page:1, size:10 }, snapshots: { page:1, size:10 }, history: { page:1, size:10 } };
-  let history = [], snapshotLatestTarget = null, undoTarget = null;
+  let latestHistory = [], snapshotLatestTarget = null, undoTarget = null;
   const sourceLabels = { initial:'Recorded at start', compile:'Compiled patch', current:'Set as latest (current files)', snapshot:'Set as latest (snapshot)', patch:'Set as latest (patch)', undo:'Undo' };
 
   const selectedSystem = () => systems.find(item => item.id === selectedSystemId);
@@ -330,7 +330,7 @@
   // ---------- Snapshots and patches ----------
   const loadHistory = async () => {
     if (!selectedSystemId) return;
-    [snapshots, packages, history] = await Promise.all([
+    [snapshots, packages, latestHistory] = await Promise.all([
       jsonRequest(`/api/patch-management/systems/${selectedSystemId}/snapshots`),
       jsonRequest(`/api/patch-management/systems/${selectedSystemId}/packages`),
       jsonRequest(`/api/patch-management/systems/${selectedSystemId}/latest-history`)
@@ -465,7 +465,7 @@
   const versionName = (label, at) => label ? `${label} · ${when(at)}` : at ? when(at) : 'no version';
   const renderHistoryFilter = () => {
     const select = byId('patch-history-module'), previous = select.value;
-    const names = [...new Set(history.map(item => item.moduleName))].sort((a, b) => a.localeCompare(b));
+    const names = [...new Set(latestHistory.map(item => item.moduleName))].sort((a, b) => a.localeCompare(b));
     select.innerHTML = '<option value="">All modules</option>' + names.map(name => `<option>${escapeHtml(name)}</option>`).join('');
     if (names.includes(previous)) select.value = previous;
   };
@@ -473,7 +473,7 @@
   const renderHistory = () => {
     const host = byId('patch-history-list'), pager = byId('patch-history-pager'), module = byId('patch-history-module').value;
     renderAsOf();
-    const items = history.filter(item => !module || item.moduleName === module);
+    const items = latestHistory.filter(item => !module || item.moduleName === module);
     if (!items.length) { host.innerHTML = '<div class="empty-state compact">No latest-version changes recorded yet.</div>'; pager.classList.add('d-none'); return; }
     renderPager(pager, items.length, pages.history, renderHistory);
     host.innerHTML = `<div class="patch-table-wrap"><table class="patch-table patch-list-table patch-history-table">
@@ -488,7 +488,7 @@
         <td class="patch-history-remarks">${escapeHtml(item.remarks)}</td>
         <td class="patch-col-actions"><span class="deploy-row-actions">${item.canUndo ? `<button class="btn btn-sm btn-soft-primary history-undo" type="button" data-event-id="${item.id}" title="Move ${escapeHtml(item.moduleName)} back to ${escapeHtml(versionName(item.previousLabel, item.previousCreatedAt))}">↶ Undo</button>` : ''}</span></td>
       </tr>`).join('')}</tbody></table></div>`;
-    host.querySelectorAll('.history-undo').forEach(button => button.addEventListener('click', () => openUndo(history.find(item => item.id === Number(button.dataset.eventId)))));
+    host.querySelectorAll('.history-undo').forEach(button => button.addEventListener('click', () => openUndo(latestHistory.find(item => item.id === Number(button.dataset.eventId)))));
   };
 
   // "Latest on <date>": for each module, the newest history entry at or before that moment.
@@ -496,9 +496,9 @@
     const host = byId('patch-history-asof'), value = byId('patch-history-date').value;
     if (!value) { host.classList.add('d-none'); host.innerHTML = ''; return; }
     const at = new Date(value).getTime();
-    const modules = [...new Set(history.map(item => item.moduleName))].sort((a, b) => a.localeCompare(b));
+    const modules = [...new Set(latestHistory.map(item => item.moduleName))].sort((a, b) => a.localeCompare(b));
     const rows = modules.map(name => {
-      const entry = history.filter(item => item.moduleName === name && new Date(item.at).getTime() <= at)[0];
+      const entry = latestHistory.filter(item => item.moduleName === name && new Date(item.at).getTime() <= at)[0];
       return `<li><strong>${escapeHtml(name)}</strong><span>${entry ? `${escapeHtml(entry.snapshotId ? versionName(entry.snapshotLabel, entry.snapshotCreatedAt) : 'No version')}<small>since ${when(entry.at)} · “${escapeHtml(entry.remarks)}”</small>` : '<span class="patch-muted">Not recorded yet at that time</span>'}</span></li>`;
     });
     host.innerHTML = `<div class="patch-asof-head"><strong>Latest versions on ${escapeHtml(new Date(value).toLocaleString())}</strong><button type="button" class="btn btn-sm btn-ghost" id="patch-history-date-clear">Clear</button></div><ul>${rows.join('')}</ul>`;
