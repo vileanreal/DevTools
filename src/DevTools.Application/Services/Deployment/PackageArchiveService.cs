@@ -21,7 +21,10 @@ public interface IPackageArchiveService
     /// </summary>
     int Extract(string archivePath, string destinationRoot, Func<string, string?> map, Action<string>? onFile, CancellationToken cancellationToken);
 
-    /// <summary>Writes a .zip (Deflate) or .7z (LZMA2) archive from files on disk plus optional text entries. Streams each file.</summary>
+    /// <summary>
+    /// Writes a .zip (Deflate) or .7z (LZMA2) archive, or with format "folder" a plain folder with the same layout, from files
+    /// on disk plus optional text entries. Streams each file. <see cref="Extract"/> and <see cref="ReadText"/> read folders too.
+    /// </summary>
     void CreateArchive(string archivePath, string format, IEnumerable<ArchiveSource> files, IReadOnlyDictionary<string, string>? textEntries, Action<string>? onFile, CancellationToken cancellationToken);
 
     /// <summary>Writes a .7z archive (LZMA2) from files on disk plus optional in-memory text entries. Streams each file; nothing is buffered whole.</summary>
@@ -62,6 +65,7 @@ public sealed class PackageArchiveService : IPackageArchiveService
     {
         var root = Path.GetFullPath(destinationRoot);
         Directory.CreateDirectory(root);
+        if (Directory.Exists(archivePath)) return CopyFromFolder(archivePath, root, map, onFile, cancellationToken);
         using var archive = Open(archivePath);
         var written = 0;
 
@@ -136,6 +140,7 @@ public sealed class PackageArchiveService : IPackageArchiveService
     public void CreateArchive(string archivePath, string format, IEnumerable<ArchiveSource> files, IReadOnlyDictionary<string, string>? textEntries, Action<string>? onFile, CancellationToken cancellationToken)
     {
         if (format == "7z") { CreateSevenZip(archivePath, files, textEntries, onFile, cancellationToken); return; }
+        if (format == "folder") { CreateFolder(archivePath, files, textEntries, onFile, cancellationToken); return; }
         if (format != "zip") throw new InvalidOperationException("Choose .zip or .7z.");
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(archivePath))!);
         var temporary = archivePath + ".partial";
@@ -195,12 +200,71 @@ public sealed class PackageArchiveService : IPackageArchiveService
 
     public string? ReadText(string archivePath, string entryName, CancellationToken cancellationToken)
     {
+        if (Directory.Exists(archivePath))
+        {
+            var path = ResolveInside(archivePath, entryName);
+            return File.Exists(path) ? File.ReadAllText(path) : null;
+        }
         using var archive = Open(archivePath);
         var entry = archive.Entries.FirstOrDefault(item => !item.IsDirectory && string.Equals(item.Key?.Replace('\\', '/'), entryName, StringComparison.OrdinalIgnoreCase));
         if (entry is null) return null;
         using var stream = entry.OpenEntryStream();
         using var text = new StreamReader(stream);
         return text.ReadToEnd();
+    }
+
+    /// <summary>Copies the files into a new folder (written as "name.partial", renamed when complete, like the archives).</summary>
+    private static void CreateFolder(string folderPath, IEnumerable<ArchiveSource> files, IReadOnlyDictionary<string, string>? textEntries, Action<string>? onFile, CancellationToken cancellationToken)
+    {
+        if (File.Exists(folderPath) || Directory.Exists(folderPath)) throw new InvalidOperationException($"The backup {Path.GetFileName(folderPath)} already exists.");
+        var temporary = folderPath + ".partial";
+        try
+        {
+            if (Directory.Exists(temporary)) Directory.Delete(temporary, recursive: true);
+            Directory.CreateDirectory(temporary);
+            foreach (var file in files)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var destination = ResolveInside(temporary, file.EntryName);
+                Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+                File.Copy(file.SourcePath, destination, overwrite: false);
+                File.SetAttributes(destination, FileAttributes.Normal);
+                File.SetLastWriteTime(destination, File.GetLastWriteTime(file.SourcePath));
+                onFile?.Invoke(file.EntryName);
+            }
+            foreach (var (name, content) in textEntries ?? new Dictionary<string, string>())
+            {
+                var destination = ResolveInside(temporary, name);
+                Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+                File.WriteAllText(destination, content, new System.Text.UTF8Encoding(false));
+            }
+            Directory.Move(temporary, folderPath);
+        }
+        finally
+        {
+            if (Directory.Exists(temporary)) Directory.Delete(temporary, recursive: true);
+        }
+    }
+
+    private static int CopyFromFolder(string folderPath, string root, Func<string, string?> map, Action<string>? onFile, CancellationToken cancellationToken)
+    {
+        var source = Path.GetFullPath(folderPath);
+        var written = 0;
+        foreach (var file in Directory.EnumerateFiles(source, "*", SearchOption.AllDirectories))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (File.GetAttributes(file).HasFlag(FileAttributes.ReparsePoint)) continue;
+            var relative = map(Path.GetRelativePath(source, file).Replace(Path.DirectorySeparatorChar, '/'));
+            if (relative is null) continue;
+            var destination = ResolveInside(root, relative);
+            Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+            if (File.Exists(destination)) File.SetAttributes(destination, FileAttributes.Normal);
+            File.Copy(file, destination, overwrite: true);
+            File.SetLastWriteTime(destination, File.GetLastWriteTime(file));
+            onFile?.Invoke(relative);
+            written++;
+        }
+        return written;
     }
 
     /// <summary>Resolves a relative path under a root and refuses anything that would land outside it.</summary>

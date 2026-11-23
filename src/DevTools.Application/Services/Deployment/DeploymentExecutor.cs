@@ -73,12 +73,14 @@ public sealed class DeploymentExecutor(IPackageArchiveService archives, ISystemS
         foreach (var module in modules)
             reporter.Log("info", $"{module.ModuleName}: {module.Mode} update, {module.BackedUpFiles.Count:N0} file(s) to back up, {module.AddedFiles.Count:N0} new file(s).");
         var backedUp = 0;
-        await Task.Run(() => archives.CreateSevenZip(plan.BackupPath, backupFiles,
+        // The backup's format follows its name (.zip, .7z, or no extension for a folder), chosen per system.
+        var backupFormat = DeploymentBackupFormats.FromPath(plan.BackupPath);
+        await Task.Run(() => archives.CreateArchive(plan.BackupPath, backupFormat, backupFiles,
             new Dictionary<string, string> { [DeploymentSteps.ManifestEntry] = JsonSerializer.Serialize(manifest, DeploymentSteps.Json) },
             _ => { if (++backedUp % 200 == 0) reporter.Step(DeploymentSteps.Backup, "running", $"{backedUp:N0} of {backupFiles.Count:N0} files"); },
             cancellationToken), cancellationToken);
         reporter.Step(DeploymentSteps.Backup, "done", $"{backupFiles.Count:N0} file(s) in {Path.GetFileName(plan.BackupPath)}");
-        reporter.Summary($"Backup: {Path.GetFileName(plan.BackupPath)} — {backupFiles.Count:N0} file(s), {FormatBytes(new FileInfo(plan.BackupPath).Length)}");
+        reporter.Summary($"Backup: {Path.GetFileName(plan.BackupPath)} — {backupFiles.Count:N0} file(s), {FormatBytes(BackupSize(plan.BackupPath))}");
         reporter.Log("info", $"Backup written to {plan.BackupPath}.");
 
         // 2-4. Stop everything, patch everything, start everything.
@@ -141,7 +143,7 @@ public sealed class DeploymentExecutor(IPackageArchiveService archives, ISystemS
 
     public async Task RollbackAsync(string backupPath, DeploymentManifest manifest, IDeploymentReporter reporter, CancellationToken cancellationToken)
     {
-        if (!File.Exists(backupPath)) throw new InvalidOperationException($"The backup file {Path.GetFileName(backupPath)} no longer exists.");
+        if (!DeploymentBackupFormats.Exists(backupPath)) throw new InvalidOperationException($"The backup {Path.GetFileName(backupPath)} no longer exists.");
         var targets = ServiceTargets(manifest.Modules.Select(module => (module.ModuleName, module.AppPoolName, module.ServiceName)));
         var wasRunning = await StopAllAsync(targets, reporter, cancellationToken);
         reporter.Step(DeploymentSteps.Restore, "running");
@@ -313,6 +315,10 @@ public sealed class DeploymentExecutor(IPackageArchiveService archives, ISystemS
     }
 
     private static string Capitalize(string value) => value.Length == 0 ? value : char.ToUpperInvariant(value[0]) + value[1..];
+
+    private static long BackupSize(string path) => Directory.Exists(path)
+        ? Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories).Sum(file => new FileInfo(file).Length)
+        : new FileInfo(path).Length;
 
     private static string FormatBytes(long value)
     {

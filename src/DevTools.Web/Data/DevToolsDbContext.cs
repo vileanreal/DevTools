@@ -70,6 +70,7 @@ public sealed class DevToolsDbContext(DbContextOptions<DevToolsDbContext> option
             entity.Property(item => item.Name).HasMaxLength(120).IsRequired();
             entity.Property(item => item.BackupDirectory).HasMaxLength(2048);
             entity.Property(item => item.PackageDirectory).HasMaxLength(2048);
+            entity.Property(item => item.BackupFormat).HasMaxLength(8).IsRequired();
             entity.HasIndex(item => item.Name).IsUnique();
             entity.HasMany(item => item.Modules).WithOne(item => item.DeploymentSystem).HasForeignKey(item => item.DeploymentSystemId).OnDelete(DeleteBehavior.Cascade);
             entity.HasMany(item => item.Packages).WithOne(item => item.DeploymentSystem).HasForeignKey(item => item.DeploymentSystemId).OnDelete(DeleteBehavior.Cascade);

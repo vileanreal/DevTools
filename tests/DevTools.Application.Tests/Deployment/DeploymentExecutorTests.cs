@@ -45,12 +45,15 @@ public sealed class DeploymentExecutorTests : IDisposable
         Assert.Contains("\"packageId\": 7", _archives.ReadText(plan.BackupPath, DeploymentSteps.ManifestEntry, CancellationToken.None));
     }
 
-    [Fact]
-    public async Task Partial_Rollback_RestoresReplacedFiles_AndRemovesAddedFiles()
+    [Theory]
+    [InlineData("11202026.7z")]
+    [InlineData("11202026.zip")]
+    [InlineData("11202026")]
+    public async Task Partial_Rollback_RestoresReplacedFiles_AndRemovesAddedFiles(string backupName)
     {
         var target = Folder("site", ("app.dll", "old app"), ("web.config", "server config"));
         var staging = Folder("pkg", ("app.dll", "new app"), ("lib/new.dll", "new lib"));
-        var plan = Plan(Module(target, staging, DeploymentModes.Partial, "web.config"));
+        var plan = Plan(Module(target, staging, DeploymentModes.Partial, "web.config")) with { BackupPath = Path.Combine(_root, "backups", backupName) };
         var manifest = await _executor.DeployAsync(plan, new Reporter(_events), CancellationToken.None);
         File.WriteAllText(Path.Combine(target, "web.config"), "edited after deploy");
 
@@ -83,12 +86,15 @@ public sealed class DeploymentExecutorTests : IDisposable
         Assert.Equal(4, Assert.Single(manifest.Modules).BackedUpFiles.Count);
     }
 
-    [Fact]
-    public async Task Full_Rollback_RestoresPreviousFiles_WithoutOverwritingExcludedFiles()
+    [Theory]
+    [InlineData("11202026.7z")]
+    [InlineData("11202026.zip")]
+    [InlineData("11202026")]
+    public async Task Full_Rollback_RestoresPreviousFiles_WithoutOverwritingExcludedFiles(string backupName)
     {
         var target = Folder("site", ("old.dll", "old"), ("bin/old2.dll", "old2"), ("web.config", "server config"));
         var staging = Folder("pkg", ("new.dll", "new"));
-        var plan = Plan(Module(target, staging, DeploymentModes.Full, "web.config"));
+        var plan = Plan(Module(target, staging, DeploymentModes.Full, "web.config")) with { BackupPath = Path.Combine(_root, "backups", backupName) };
         var manifest = await _executor.DeployAsync(plan, new Reporter(_events), CancellationToken.None);
         File.WriteAllText(Path.Combine(target, "web.config"), "edited after deploy");
 
@@ -186,17 +192,31 @@ public sealed class DeploymentExecutorTests : IDisposable
         Assert.DoesNotContain("step:patch:running", _events);
     }
 
-    [Fact]
-    public async Task SevenZipBackup_CanBeReadBack()
+    [Theory]
+    [InlineData("11202026.7z")]
+    [InlineData("11202026.zip")]
+    [InlineData("11202026")]
+    public async Task Backup_CanBeReadBack_InEveryFormat(string backupName)
     {
         var target = Folder("site", ("big.bin", new string('x', 200_000)));
-        var plan = Plan(Module(target, Folder("pkg", ("big.bin", "y")), DeploymentModes.Partial, null));
+        var plan = Plan(Module(target, Folder("pkg", ("big.bin", "y")), DeploymentModes.Partial, null)) with { BackupPath = Path.Combine(_root, "backups", backupName) };
 
         await _executor.DeployAsync(plan, new Reporter(_events), CancellationToken.None);
         var restoreRoot = Path.Combine(_root, "restored");
         _archives.Extract(plan.BackupPath, restoreRoot, entry => entry.StartsWith("WebApi/") ? entry["WebApi/".Length..] : null, null, CancellationToken.None);
 
         Assert.Equal(200_000, new FileInfo(Path.Combine(restoreRoot, "big.bin")).Length);
+        Assert.NotNull(_archives.ReadText(plan.BackupPath, DeploymentSteps.ManifestEntry, CancellationToken.None));
+        if (!backupName.Contains('.'))
+        {
+            Assert.True(Directory.Exists(plan.BackupPath));
+            Assert.False(Directory.Exists(plan.BackupPath + ".partial"));
+            return;
+        }
+        using var stream = File.OpenRead(plan.BackupPath);
+        var signature = new byte[2];
+        stream.ReadExactly(signature);
+        Assert.Equal(backupName.EndsWith(".zip") ? "PK" : "7z", System.Text.Encoding.ASCII.GetString(signature));
     }
 
     [Fact]

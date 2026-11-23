@@ -8,7 +8,7 @@ namespace DevTools.Web.Data;
 
 public static class DatabaseInitializer
 {
-    private const int CurrentSchemaVersion = 9;
+    private const int CurrentSchemaVersion = 10;
     private static readonly string[] ApplicationTables =
     [
         "LogSystems", "LogSources", "SqlDocSources", "SqlDocDiagrams", "ServiceSystems", "ManagedServices",
@@ -118,7 +118,8 @@ public static class DatabaseInitializer
                 Name TEXT NOT NULL,
                 BackupDirectory TEXT NULL,
                 PackageDirectory TEXT NULL,
-                RequireVersionChange INTEGER NOT NULL DEFAULT 0
+                RequireVersionChange INTEGER NOT NULL DEFAULT 0,
+                BackupFormat TEXT NOT NULL DEFAULT 'zip'
             )
             """, transaction);
         Execute(connection, """
@@ -246,6 +247,8 @@ public static class DatabaseInitializer
         // v9 (v8 is used by the 1.4 line): optional "require a new version" check per system, main file per module.
         if (!columns.Contains("RequireVersionChange")) Execute(connection, "ALTER TABLE DeploymentSystems ADD COLUMN RequireVersionChange INTEGER NOT NULL DEFAULT 0", transaction);
         if (!Columns(connection, transaction, "DeploymentModules").Contains("VersionFile")) Execute(connection, "ALTER TABLE DeploymentModules ADD COLUMN VersionFile TEXT NULL", transaction);
+        // v10: backup format per system (.zip by default; existing backups keep their format and still roll back).
+        if (!columns.Contains("BackupFormat")) Execute(connection, "ALTER TABLE DeploymentSystems ADD COLUMN BackupFormat TEXT NOT NULL DEFAULT 'zip'", transaction);
     }
 
     /// <summary>
@@ -325,6 +328,7 @@ public static class DatabaseInitializer
         if (requiredColumns.Any(column => !columns.Contains(column))) return true;
         return !Columns(connection, null, "DeploymentSystems").Contains("PackageDirectory")
             || !Columns(connection, null, "DeploymentSystems").Contains("RequireVersionChange")
+            || !Columns(connection, null, "DeploymentSystems").Contains("BackupFormat")
             || !Columns(connection, null, "DeploymentModules").Contains("VersionFile")
             || !Columns(connection, null, "DeploymentPackages").Contains("Description")
             || !Columns(connection, null, "PatchModules").Contains("LatestSnapshotId")

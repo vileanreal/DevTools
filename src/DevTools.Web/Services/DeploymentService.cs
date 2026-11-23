@@ -49,12 +49,15 @@ public sealed class DeploymentService(
         if (backup is not null) paths.EnsureSafeStorageFolder(backup, "backup");
         var packageFolder = string.IsNullOrWhiteSpace(request.PackageDirectory) ? null : paths.Normalize(request.PackageDirectory, "Package folder");
         if (packageFolder is not null) paths.EnsureSafeStorageFolder(packageFolder, "package");
+        if (!string.IsNullOrWhiteSpace(request.BackupFormat) && !DeploymentBackupFormats.IsValid(request.BackupFormat.Trim().ToLowerInvariant()))
+            throw new ArgumentException("Choose a folder, .zip or .7z for the backup.");
+        var backupFormat = DeploymentBackupFormats.Normalize(request.BackupFormat);
         if (await database.DeploymentSystems.AnyAsync(item => item.Id != (id ?? 0) && item.Name.ToLower() == name.ToLower(), cancellationToken))
             throw new ArgumentException("A deployment system with this name already exists.");
         DeploymentSystem entity;
         if (id is null)
         {
-            entity = new DeploymentSystem { Name = name, BackupDirectory = backup, PackageDirectory = packageFolder, RequireVersionChange = request.RequireVersionChange };
+            entity = new DeploymentSystem { Name = name, BackupDirectory = backup, PackageDirectory = packageFolder, RequireVersionChange = request.RequireVersionChange, BackupFormat = backupFormat };
             database.DeploymentSystems.Add(entity);
         }
         else
@@ -65,6 +68,7 @@ public sealed class DeploymentService(
             entity.BackupDirectory = backup;
             entity.PackageDirectory = packageFolder;
             entity.RequireVersionChange = request.RequireVersionChange;
+            entity.BackupFormat = backupFormat;
             // Backups and packages must never sit inside a module folder: a whole-package deployment would delete them.
             EnsureStorageOutsideModules(entity, entity.Modules);
         }
@@ -326,7 +330,7 @@ public sealed class DeploymentService(
                 && item.Status is DeploymentPackageStatuses.Deployed or DeploymentPackageStatuses.Failed or DeploymentPackageStatuses.Interrupted;
             var label = string.IsNullOrWhiteSpace(item.Description) ? item.FileName : $"{item.FileName} — {item.Description}";
             return new RollbackDeployment(item.Id, label, item.DeployedAtUtc ?? item.UploadedAtUtc, inPlace,
-                item.BackupPath is not null && File.Exists(item.BackupPath),
+                DeploymentBackupFormats.Exists(item.BackupPath),
                 manifest?.Modules.Select(module => module.ModuleId).ToList(),
                 manifest?.Modules.GroupBy(module => module.ModuleId).ToDictionary(group => group.Key, group => group.First().ModuleName) ?? new Dictionary<int, string>());
         }));
@@ -362,7 +366,7 @@ public sealed class DeploymentService(
 
     private DeploymentSystemDto ToDto(DeploymentSystem entity) =>
         new(entity.Id, entity.Name, entity.BackupDirectory, paths.BackupDirectory(entity), entity.PackageDirectory, paths.PackageDirectory(entity),
-            entity.Modules.OrderBy(module => module.Name).Select(ToDto).ToList(), entity.RequireVersionChange);
+            entity.Modules.OrderBy(module => module.Name).Select(ToDto).ToList(), entity.RequireVersionChange, DeploymentBackupFormats.Normalize(entity.BackupFormat));
 
     private static DeploymentModuleDto ToDto(DeploymentModule entity) =>
         new(entity.Id, entity.DeploymentSystemId, entity.Name, entity.TargetPath, entity.AppPoolName, entity.ServiceName, entity.DefaultExclusions, entity.VersionFile);

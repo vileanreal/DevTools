@@ -41,8 +41,37 @@ public sealed record DeploymentPackageModuleContents(string FolderName, string? 
 public sealed record DeploymentPackageContents(int PackageId, IReadOnlyList<DeploymentPackageModuleContents> Modules);
 
 public sealed record DeploymentModuleDto(int Id, int SystemId, string Name, string TargetPath, string? AppPoolName, string? ServiceName, string? DefaultExclusions, string? VersionFile = null);
-public sealed record DeploymentSystemDto(int Id, string Name, string? BackupDirectory, string EffectiveBackupDirectory, string? PackageDirectory, string EffectivePackageDirectory, IReadOnlyList<DeploymentModuleDto> Modules, bool RequireVersionChange = false);
-public sealed record SaveDeploymentSystemRequest(string? Name, string? BackupDirectory, string? PackageDirectory = null, bool RequireVersionChange = false);
+public sealed record DeploymentSystemDto(int Id, string Name, string? BackupDirectory, string EffectiveBackupDirectory, string? PackageDirectory, string EffectivePackageDirectory, IReadOnlyList<DeploymentModuleDto> Modules, bool RequireVersionChange = false, string BackupFormat = DeploymentBackupFormats.Zip);
+public sealed record SaveDeploymentSystemRequest(string? Name, string? BackupDirectory, string? PackageDirectory = null, bool RequireVersionChange = false, string? BackupFormat = null);
+
+/// <summary>
+/// Format of the backup written before each deployment: a plain folder (fastest, no compression), .zip (the default:
+/// fast and compact) or .7z (SharpCompress' non-solid writer is much slower and often larger than .zip).
+/// </summary>
+public static class DeploymentBackupFormats
+{
+    public const string Folder = "folder";
+    public const string Zip = "zip";
+    public const string SevenZip = "7z";
+    public static readonly IReadOnlyList<string> All = [Folder, Zip, SevenZip];
+    public static bool IsValid(string? format) => format is Folder or Zip or SevenZip;
+    /// <summary>Unknown or empty values fall back to .zip.</summary>
+    public static string Normalize(string? format) => format?.Trim().TrimStart('.').ToLowerInvariant() switch
+    {
+        SevenZip => SevenZip,
+        Folder => Folder,
+        _ => Zip
+    };
+    /// <summary>The format of an existing backup, from its name: .zip, .7z, otherwise a folder.</summary>
+    public static string FromPath(string path) => Path.GetExtension(path).ToLowerInvariant() switch
+    {
+        ".zip" => Zip,
+        ".7z" => SevenZip,
+        _ => Folder
+    };
+    /// <summary>A backup is a file (.zip/.7z) or a folder.</summary>
+    public static bool Exists(string? path) => path is not null && (File.Exists(path) || Directory.Exists(path));
+}
 public sealed record SaveDeploymentModuleRequest(string? Name, string? TargetPath, string? AppPoolName, string? ServiceName, string? DefaultExclusions, string? VersionFile = null);
 
 /// <summary>

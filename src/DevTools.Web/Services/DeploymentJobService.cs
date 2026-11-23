@@ -198,7 +198,7 @@ public sealed class DeploymentJobService(
         try
         {
             Directory.CreateDirectory(backupDirectory);
-            var backupPath = Path.Combine(backupDirectory, DeploymentPackageLayout.BackupFileName(DateTime.Now, name => File.Exists(Path.Combine(backupDirectory, name))));
+            var backupPath = Path.Combine(backupDirectory, DeploymentPackageLayout.BackupFileName(DateTime.Now, system.BackupFormat, name => DeploymentBackupFormats.Exists(Path.Combine(backupDirectory, name))));
             job.BackupFileName = Path.GetFileName(backupPath);
             // Recorded before any file changes, so an interrupted job can still be rolled back from its backup.
             package.Status = DeploymentPackageStatuses.Deploying;
@@ -324,8 +324,8 @@ public sealed class DeploymentJobService(
                 package.Error = Truncate(error);
                 package.ManifestJson = manifestJson ?? ReadManifest(backupPath);
                 // Nothing changed if no backup exists, or the deployment was restored; don't offer it for rollback.
-                if (finalStatus == DeploymentPackageStatuses.Restored || !File.Exists(backupPath)) package.DeployedAtUtc = null;
-                if (!File.Exists(backupPath)) package.BackupPath = null;
+                if (finalStatus == DeploymentPackageStatuses.Restored || !DeploymentBackupFormats.Exists(backupPath)) package.DeployedAtUtc = null;
+                if (!DeploymentBackupFormats.Exists(backupPath)) package.BackupPath = null;
             });
         }
     }
@@ -389,7 +389,7 @@ public sealed class DeploymentJobService(
 
     private string? ReadManifest(string backupPath)
     {
-        try { return File.Exists(backupPath) ? archives.ReadText(backupPath, DeploymentSteps.ManifestEntry, CancellationToken.None) : null; }
+        try { return DeploymentBackupFormats.Exists(backupPath) ? archives.ReadText(backupPath, DeploymentSteps.ManifestEntry, CancellationToken.None) : null; }
         catch (Exception) { return null; }
     }
 

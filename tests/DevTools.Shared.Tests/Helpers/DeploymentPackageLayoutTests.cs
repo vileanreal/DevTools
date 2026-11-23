@@ -1,4 +1,5 @@
 using DevTools.Shared.Helpers;
+using DevTools.Shared.Models;
 
 namespace DevTools.Shared.Tests.Helpers;
 
@@ -79,7 +80,31 @@ public sealed class DeploymentPackageLayoutTests
         var date = new DateTime(2026, 11, 20, 14, 30, 0);
         var existing = new HashSet<string> { "11202026.7z", "11202026-2.7z" };
 
-        Assert.Equal("11202026.7z", DeploymentPackageLayout.BackupFileName(date, _ => false));
-        Assert.Equal("11202026-3.7z", DeploymentPackageLayout.BackupFileName(date, existing.Contains));
+        Assert.Equal("11202026.7z", DeploymentPackageLayout.BackupFileName(date, DeploymentBackupFormats.SevenZip, _ => false));
+        Assert.Equal("11202026-3.7z", DeploymentPackageLayout.BackupFileName(date, DeploymentBackupFormats.SevenZip, existing.Contains));
+    }
+
+    [Fact]
+    public void BackupFileName_UsesZipAndCountsBackupsInEitherFormat()
+    {
+        var date = new DateTime(2026, 11, 20, 14, 30, 0);
+        var existing = new HashSet<string> { "11202026.7z", "11202026-2.zip" };
+
+        Assert.Equal("11202026.zip", DeploymentPackageLayout.BackupFileName(date, DeploymentBackupFormats.Zip, _ => false));
+        Assert.Equal("11202026-3.zip", DeploymentPackageLayout.BackupFileName(date, DeploymentBackupFormats.Zip, existing.Contains));
+        Assert.Equal("11202026.zip", DeploymentPackageLayout.BackupFileName(date, "unknown", _ => false));
+    }
+
+    [Fact]
+    public void BackupFileName_FolderHasNoExtensionAndSharesTheDayCounter()
+    {
+        var date = new DateTime(2026, 11, 20, 14, 30, 0);
+        var existing = new HashSet<string> { "11202026.zip", "11202026-2" };
+
+        Assert.Equal("11202026", DeploymentPackageLayout.BackupFileName(date, DeploymentBackupFormats.Folder, _ => false));
+        Assert.Equal("11202026-3", DeploymentPackageLayout.BackupFileName(date, DeploymentBackupFormats.Folder, existing.Contains));
+        Assert.Equal("11202026-3.7z", DeploymentPackageLayout.BackupFileName(date, DeploymentBackupFormats.SevenZip, existing.Contains));
+        Assert.Equal(DeploymentBackupFormats.Folder, DeploymentBackupFormats.FromPath("/backups/11202026-3"));
+        Assert.Equal(DeploymentBackupFormats.Zip, DeploymentBackupFormats.FromPath("/backups/11202026.ZIP"));
     }
 }

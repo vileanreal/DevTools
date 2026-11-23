@@ -73,13 +73,18 @@ public static class DeploymentPackageLayout
         return slash <= 0 || slash == normalized.Length - 1 ? null : (normalized[..slash], normalized[(slash + 1)..]);
     }
 
-    /// <summary>Backup names follow mmddyyyy.7z; later backups on the same day get -2, -3, ...</summary>
-    public static string BackupFileName(DateTime date, Func<string, bool> exists)
+    /// <summary>
+    /// Backup names follow mmddyyyy.zip, mmddyyyy.7z or a folder named mmddyyyy; later backups on the same day get -2, -3, ...
+    /// A number is taken when a backup in any format already uses it, so a day's backups stay in order after a format change.
+    /// </summary>
+    public static string BackupFileName(DateTime date, string format, Func<string, bool> exists)
     {
+        var normalized = DeploymentBackupFormats.Normalize(format);
         var stem = date.ToString("MMddyyyy", CultureInfo.InvariantCulture);
-        var name = $"{stem}.7z";
-        for (var counter = 2; exists(name); counter++) name = $"{stem}-{counter}.7z";
-        return name;
+        bool Taken(string candidate) => exists(candidate) || exists($"{candidate}.{DeploymentBackupFormats.Zip}") || exists($"{candidate}.{DeploymentBackupFormats.SevenZip}");
+        var name = stem;
+        for (var counter = 2; Taken(name); counter++) name = $"{stem}-{counter}";
+        return normalized == DeploymentBackupFormats.Folder ? name : $"{name}.{normalized}";
     }
 
     private static string? FindWrapper(IEnumerable<string> files, IEnumerable<string> moduleNames)

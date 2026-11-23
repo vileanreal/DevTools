@@ -8,6 +8,8 @@ public sealed class DeploymentSystem
     public string? PackageDirectory { get; set; }
     /// <summary>When on, a module whose main file (<see cref="DeploymentModule.VersionFile"/>) has the same version as on the server can't be deployed.</summary>
     public bool RequireVersionChange { get; set; }
+    /// <summary>Format of the backup written before each deployment: "zip" (default) or "7z".</summary>
+    public string BackupFormat { get; set; } = "zip";
     public List<DeploymentModule> Modules { get; set; } = [];
     public List<DeploymentPackage> Packages { get; set; } = [];
 }

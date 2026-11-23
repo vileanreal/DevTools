@@ -110,6 +110,8 @@
     byId('deploy-system-backup-input').value = system?.backupDirectory ?? '';
     byId('deploy-system-package-input').value = system?.packageDirectory ?? '';
     byId('deploy-system-require-version').checked = Boolean(system?.requireVersionChange);
+    const backupFormat = ['folder', '7z'].includes(system?.backupFormat) ? system.backupFormat : 'zip';
+    document.querySelectorAll('input[name="deploy-system-backup-format"]').forEach(input => { input.checked = input.value === backupFormat; });
     byId('deploy-system-modal-title').textContent = system ? 'Edit system' : 'Add system';
     byId('deploy-system-submit').textContent = system ? 'Save changes' : 'Add system';
     systemModal.show();
@@ -117,7 +119,7 @@
 
   const saveSystem = async event => {
     event.preventDefault();
-    const body = { name:byId('deploy-system-name-input').value, backupDirectory:byId('deploy-system-backup-input').value || null, packageDirectory:byId('deploy-system-package-input').value || null, requireVersionChange:byId('deploy-system-require-version').checked };
+    const body = { name:byId('deploy-system-name-input').value, backupDirectory:byId('deploy-system-backup-input').value || null, packageDirectory:byId('deploy-system-package-input').value || null, requireVersionChange:byId('deploy-system-require-version').checked, backupFormat:document.querySelector('input[name="deploy-system-backup-format"]:checked')?.value || 'zip' };
     try {
       const saved = await jsonRequest(editingSystemId ? `/api/deployment/systems/${editingSystemId}` : '/api/deployment/systems', editingSystemId ? 'PUT' : 'POST', body);
       systemModal.hide(); await loadSystems(); notify(editingSystemId ? 'System updated.' : 'System added.');
@@ -649,11 +651,16 @@
     return { running:`${verb} in progress`, succeeded:`${verb} completed`, restored:'Deployment failed · previous version restored', failed:`${verb} failed` }[job.status] || verb;
   };
 
+  // The panel is rebuilt on every poll, so the activity log's open/closed state and scroll position are carried over:
+  // once the user opens or closes it, that choice sticks for the rest of the job.
+  let logState = { jobId:null, open:null };
   const renderJob = () => {
     const host = byId('deploy-job');
     if (!job) { host.classList.add('d-none'); return; }
     const packageName = packages.find(item => item.id === job.packageId)?.fileName || 'package';
-    const log = byId('deploy-job-log'), atBottom = !log || log.scrollTop + log.clientHeight >= log.scrollHeight - 8;
+    if (logState.jobId !== job.jobId) logState = { jobId:job.jobId, open:null };
+    const log = byId('deploy-job-log'), atBottom = !log || log.scrollTop + log.clientHeight >= log.scrollHeight - 8, scrollTop = log?.scrollTop ?? 0;
+    const logOpen = logState.open ?? ['failed', 'restored'].includes(job.status);
     host.className = `deploy-card deploy-job deploy-job-${job.status}`;
     host.innerHTML = `
       <div class="deploy-job-head">
@@ -662,8 +669,9 @@
       </div>
       ${job.error ? `<div class="deploy-error">${escapeHtml(job.error)}</div>` : ''}
       <ol class="deploy-steps">${job.steps.map(step => `<li class="deploy-step step-${step.status}"><span class="deploy-step-mark">${step.status === 'running' ? '<span class="spinner-border spinner-border-sm"></span>' : stepIcon(step.status)}</span><span><strong>${escapeHtml(step.label)}</strong>${step.detail ? `<small>${escapeHtml(step.detail)}</small>` : ''}</span></li>`).join('')}</ol>
-      <details class="deploy-log" ${['failed', 'restored'].includes(job.status) ? 'open' : ''}><summary>Activity log (${job.log.length})</summary><div id="deploy-job-log" class="deploy-log-lines">${job.log.map(line => `<div class="log-${line.level}"><time>${new Date(line.at).toLocaleTimeString()}</time><span>${escapeHtml(line.message)}</span></div>`).join('')}</div></details>`;
-    const newLog = byId('deploy-job-log'); if (newLog && atBottom) newLog.scrollTop = newLog.scrollHeight;
+      <details class="deploy-log" ${logOpen ? 'open' : ''}><summary>Activity log (${job.log.length})</summary><div id="deploy-job-log" class="deploy-log-lines">${job.log.map(line => `<div class="log-${line.level}"><time>${new Date(line.at).toLocaleTimeString()}</time><span>${escapeHtml(line.message)}</span></div>`).join('')}</div></details>`;
+    const newLog = byId('deploy-job-log'); if (newLog) newLog.scrollTop = atBottom ? newLog.scrollHeight : scrollTop;
+    host.querySelector('details.deploy-log')?.addEventListener('toggle', event => { logState.open = event.currentTarget.open; });
     renderPackages();
   };
 
